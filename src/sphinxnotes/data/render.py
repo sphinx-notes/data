@@ -2,6 +2,8 @@
 sphinxnotes.data.render
 ~~~~~~~~~~~~~~~~~~~~~~~
 
+Module for rendering data to doctree nodes.
+
 :copyright: Copyright 2025 by the Shengyu Zhang.
 :license: BSD, see LICENSE for details.
 """
@@ -18,7 +20,6 @@ from sphinx.util.docutils import SphinxDirective, SphinxRole
 from sphinx.transforms import SphinxTransform
 from sphinx.transforms.post_transforms import ReferencesResolver
 
-
 from .data import Field, Schema, RawData, Data
 from .template import Template, Phase
 from . import extra_contexts
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Possible caller of :meth:`Pending.render`.
+# Possible caller of :meth:`pending_node.render`.
 # TODO: support Any?
 type Caller = SphinxDirective | SphinxRole | SphinxTransform
 
