@@ -28,6 +28,15 @@ Introduction
 
 .. INTRODUCTION START
 
+.. warning::
+
+   PRE-RELEAST, DO NOT use it.
+
+   This extension provides the underlying functionality for `sphinxnotes-any`__.
+
+   __ https://sphinx.silverrainz.me/any/
+
+
 .. INTRODUCTION END
 
 Getting Started
