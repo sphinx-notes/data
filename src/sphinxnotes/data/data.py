@@ -360,7 +360,7 @@ class DSLParser:
 @dataclass(frozen=True)
 class Schema(object):
     name: Field | None
-    attrs: dict[str, Field]
+    attrs: dict[str, Field] | Field
     content: Field | None
 
     @classmethod
@@ -415,35 +415,29 @@ class Schema(object):
 
         return Data(name, attrs, content)
 
-    def fields(
-        self, pred: Callable[[Field], bool] | None = None
-    ) -> Generator[tuple[str, Field]]:
-        def ok(f: Field) -> bool:
-            return not pred or pred(f)
-
-        if self.name and ok(self.name):
+    def fields(self) -> Generator[tuple[str, Field]]:
+        if self.name:
             yield 'name', self.name
 
-        for name, field in self.attrs.items():
-            if ok(field):
+        if isinstance(self.attrs, Field):
+            yield 'attrs', self.attrs
+        else:
+            for name, field in self.attrs.items():
                 yield name, field
 
-        if self.content and ok(self.content):
+        if self.content:
             yield 'content', self.content
 
-    def items(
-        self, data: Data, pred: Callable[[Field], bool] | None = None
-    ) -> Generator[tuple[str, Field, Value]]:
-        def ok(f: Field) -> bool:
-            return not pred or pred(f)
-
-        if self.name and ok(self.name):
+    def items(self, data: Data) -> Generator[tuple[str, Field, Value]]:
+        if self.name:
             yield 'name', self.name, data.name
 
-        for name, field in self.attrs.items():
-            if not ok(field):
-                continue
-            yield name, field, data.attrs.get(name)
+        if isinstance(self.attrs, Field):
+            for name, val in data.attrs:
+                yield name, self.attrs, val
+        else:
+            for name, field in self.attrs.items():
+                yield name, field, data.attrs.get(name)
 
-        if self.content and ok(self.content):
+        if self.content:
             yield 'content', self.content, data.content
