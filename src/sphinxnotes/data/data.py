@@ -403,8 +403,8 @@ class Schema(object):
         else:
             rawattrs = data.attrs.copy()
             for key, field in self.attrs.items():
-                rawval = rawattrs.pop(key)
-                attrs[key] = self._parse_single(('attrs.' + key, field), rawval)
+                if rawval := rawattrs.pop(key, None):
+                    attrs[key] = self._parse_single(('attrs.' + key, field), rawval)
             for key, rawval in rawattrs.items():
                 raise ValueError(f'unknown attr: "{key}"')
 
