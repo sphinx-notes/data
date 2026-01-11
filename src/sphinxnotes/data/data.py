@@ -1,43 +1,85 @@
 from __future__ import annotations
+from typing import TYPE_CHECKING
 import re
-import dataclasses
-from typing import Any, Callable
+from dataclasses import dataclass, asdict, field as dataclass_field
+from ast import literal_eval
+
+if TYPE_CHECKING:
+    from typing import Any, Callable, Generator, Self, Literal as Lit
 
 
-type Value = None | int | float | str | bool | list[Value]
+#########################################
+# Basic classes: Value, Form, Flag, ... #
+#########################################
+
+type PlainValue = bool | int | float | str
+type Value = None | PlainValue | list[PlainValue]
 
 
-@dataclasses.dataclass(frozen=True)
-class Raw(object):
-    name: str | None
-    attrs: dict[str, str]
-    content: str
+@dataclass
+class ValueWrapper:
+    v: Value
+
+    def as_plain(self) -> PlainValue | None:
+        if self.v is None:
+            return None
+        if isinstance(self.v, list):
+            if len(self.v) == 0:
+                return None
+            return self.v[0]
+        return self.v
+
+    def as_str(self) -> str | None:
+        return str(self.as_plain())
+
+    def as_list(self) -> list[PlainValue]:
+        if self.v is None:
+            return []
+        elif isinstance(self.v, list):
+            return [x for x in self.v]
+        else:
+            return [self.v]
+
+    def as_str_list(self) -> list[str]:
+        if self.v is None:
+            return []
+        elif isinstance(self.v, list):
+            return [str(x) for x in self.v]
+        else:
+            return [str(self.v)]
 
 
-@dataclasses.dataclass(frozen=True)
-class Data(object):
-    name: Value
-    attrs: dict[str, Value]
-    content: Value
-
-    @staticmethod
-    def from_raw(raw: Raw) -> Data:
-        return Data(
-            name=raw.name,
-            attrs={k: v for k, v in raw.attrs.items()},
-            content=raw.content,
-        )
-
-    def ascontext(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
-
-
-@dataclasses.dataclass(frozen=True)
+@dataclass(frozen=True)
 class Form:
-    """Defines how to split the string and the return type."""
+    """Defines how to split the string and the container type."""
 
-    rtype: type
+    ctype: type
     sep: str
+
+
+@dataclass(frozen=True)
+class Flag:
+    name: str
+
+
+@dataclass(frozen=True)
+class BoolFlag(Flag):
+    default: bool = False
+
+
+type FlagStore = Lit['assign'] | Lit['append']
+
+
+@dataclass(frozen=True)
+class OperFlag(Flag):
+    etype: type = str
+    default: Value = None
+    store: FlagStore = 'assign'
+
+
+############
+# Registry #
+############
 
 
 class Registry:
@@ -50,9 +92,12 @@ class Registry:
         'integer': int,
         'float': float,
         'number': float,
+        'num': float,
         'str': str,
         'string': str,
     }
+
+    """Internal type converters."""
 
     @staticmethod
     def _bool_conv(v: str | None) -> bool:
@@ -64,40 +109,156 @@ class Registry:
         # Same to :meth:`directives.flag`.
         raise ValueError(f'no argument is allowed; "{v}" supplied')
 
+    @staticmethod
+    def _str_conv(v: str) -> str:
+        try:
+            vv = literal_eval(v)
+        except (ValueError, SyntaxError):
+            return v
+        return vv if isinstance(vv, str) else v
+
     convs: dict[type, Callable[[str], Any]] = {
         bool: _bool_conv,
         int: int,
         float: float,
-        str: str,
+        str: _str_conv,
     }
 
     forms: dict[str, Form] = {
-        'list': Form(rtype=list, sep=','),
-        'lines': Form(rtype=list, sep='\n'),
-        'words': Form(
-            rtype=list,
-            sep=' ',
-        ),
+        'list': Form(ctype=list, sep=','),
+        'lines': Form(ctype=list, sep='\n'),
+        'words': Form(ctype=list, sep=' '),
+    }
+
+    """Builtin flags."""
+
+    _required_flag = BoolFlag('required')
+    _sep_flag = OperFlag('sep', etype=str)
+
+    flags: dict[str, BoolFlag] = {
+        'required': _required_flag,
+        'require': _required_flag,
+        'req': _required_flag,
+    }
+
+    byflags: dict[str, OperFlag] = {
+        'separate': _sep_flag,
+        'sep': _sep_flag,
     }
 
 
-@dataclasses.dataclass()
-class Field:
-    # Type of element.
-    etype: type = str
-    required: bool = False
-    # Form of elements (if the field holds multiple values).
-    form: Form | None = None
+##########################
+# Data, Field and Schema #
+##########################
 
-    @staticmethod
-    def from_str(dsl: str) -> Field:
+
+@dataclass
+class RawData:
+    name: str | None
+    attrs: dict[str, str]
+    content: str | None
+
+
+@dataclass
+class Data:
+    name: Value
+    attrs: dict[str, Value]
+    content: Value
+
+    def ascontext(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def title(self) -> str | None:
+        return ValueWrapper(self.name).as_str()
+
+
+@dataclass
+class Field:
+    #: Type of element.
+    etype: type = str
+    #: Type of container (if the field holds multiple values).
+    ctype: type | None = None
+    #: Flags of field.
+    flags: dict[str, Value] = dataclass_field(default_factory=dict)
+
+    # Type hints for builtin flags.
+    if TYPE_CHECKING:
+        required: bool = False
+        sep: str | None = None
+
+    @classmethod
+    def from_dsl(cls, dsl: str) -> Self:
+        self = cls()
+        DSLParser(self).parse(dsl)
+        return self
+
+    def __post_init__(self) -> None:
+        # Init flags and by flags.
+        for flag in Registry.flags.values():
+            if flag.name not in self.flags:
+                self.flags[flag.name] = flag.default
+        for flag in Registry.byflags.values():
+            if flag.name not in self.flags:
+                self.flags[flag.name] = flag.default
+
+    def parse(self, rawval: str | None) -> Value:
+        """
+        Parses the raw input string into the target Value.
+        When a None is passed, which means the field is not supplied.
+        """
+        if rawval is None:
+            if self.required:
+                # Same to :meth:`directives.unchanged_required`.
+                raise ValueError('argument required but none supplied')
+            if self.ctype:
+                # Return a empty container when a None value is optional.
+                return self.ctype()
+            if self.etype is bool:
+                # Special case: A single bool field is valid even when
+                # value is not supplied.
+                return Registry._bool_conv(rawval)
+            return None
+
+        # Strip whitespace. TODO: supported unchanged?
+        rawval = rawval.strip()
+
+        try:
+            conv = Registry.convs[self.etype]
+
+            if self.ctype is None:
+                # Parse as scalar
+                return conv(rawval)
+
+            # Parse as container
+            if self.sep == ' ':
+                items = rawval.split()  # split by arbitrary whitespace
+            elif self.sep == '':
+                items = list(rawval)  # split by char
+            else:
+                items = rawval.split(self.sep)
+
+            elems = [conv(x.strip()) for x in items if x.strip() != '']
+
+            return self.ctype(elems)
+        except ValueError as e:
+            raise ValueError(f"failed to parse '{rawval}' as {self.etype}: {e}")
+
+    def __getattr__(self, name: str) -> Value:
+        if name in self.flags:
+            return self.flags[name]
+        raise AttributeError(name)
+
+
+@dataclass
+class DSLParser:
+    field: Field
+
+    def parse(self, dsl: str) -> None:
         """Parses the DSL string into a Field object."""
-        self = Field()
         # Initialize form as None, implied scalar unless modifiers change it.
         for mod in self._split_modifiers(dsl):
             if mod.strip():
                 self._apply_modifier(mod.strip())
-        return self
 
     def _split_modifiers(self, text: str) -> list[str]:
         """Splits the DSL string by comma, ignoring commas inside quotes."""
@@ -141,94 +302,79 @@ class Field:
                     f'unsupported form: "{form}". '
                     f'available: {list(Registry.forms.keys())}'
                 )
-            self.etype = Registry.etypes[etype]
-            if self.form is None:
-                self.form = Registry.forms[form]
-            else:
-                # Create a copy so we don't mutate the global registry default
-                # when modifying self.form.sep later.
-                self.form = Form(Registry.forms[form].rtype, self.form.sep)
+
+            self.field.etype = Registry.etypes[etype]
+            self.field.ctype = Registry.forms[form].ctype
+            self.field.flags[Registry._sep_flag.name] = Registry.forms[form].sep
             return
 
         # Match: Type only (e.g., "int")
         if lower_mod in Registry.etypes:
-            self.etype = Registry.etypes[lower_mod]
+            self.field.etype = Registry.etypes[lower_mod]
             return
 
-        # Match: Required flag
-        if lower_mod in ['required', 'req']:
-            self.required = True
+        # Match: XXX by XXX (e.g., "sep by '|'")
+        if match := re.match(r'^([a-zA-Z_]+)\s+by\s+(.+)$', clean_mod, re.IGNORECASE):
+            flagname, rawval = match.groups()
+
+            if flagname not in Registry.byflags:
+                raise ValueError(
+                    f'unsupported flag: "{flagname}" by. '
+                    f'available: {list(Registry.byflags.keys())}'
+                )
+
+            flags = self.field.flags
+            flag = Registry.byflags[flagname]
+            val = Registry.convs[flag.etype](rawval)
+
+            if flag.store == 'assign':
+                flags[flag.name] = val
+            elif flag.store == 'append':
+                if flags[flag.name] is None:
+                    flags[flag.name] = []
+                vals = flags[flag.name]
+                assert isinstance(vals, list)
+                vals.append(val)
+            else:
+                raise ValueError(
+                    f'unsupported flag store: "{flag.store}". available: {FlagStore}'
+                )
+
+            # Deal with builtin flags.
+            if flag == Registry._sep_flag:
+                # ctype default to list if 'sep by' is used without a 'xxx of xxx'.
+                if self.field.ctype is None:
+                    self.field.ctype = list
+
             return
 
-        # Match: Custom separator (e.g., "sep by '|'")
-        if match := re.match(r'^sep\s+by\s+(.+)$', clean_mod, re.IGNORECASE):
-            rawsep = match.group(1).strip()
-            # Default to list if 'sep by' is used without a 'xxx of xxx'.
-            form = self.form or Registry.forms['list']
-            self.form = Form(form.rtype, self._strip_quotes(rawsep))
+        # Match: bool flags.
+        if lower_mod in Registry.flags:
+            flag = Registry.flags[lower_mod]
+            self.field.flags[flag.name] = not flag.default
             return
 
         raise ValueError(f"unknown modifier: '{mod}'")
 
-    def _strip_quotes(self, s: str) -> str:
-        """Removes outer quotes and unescapes basic characters."""
-        if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
-            content = s[1:-1]
-            return content.replace(r'\n', '\n').replace(r'\t', '\t').replace(r'\,', ',')
-        return s
 
-    def parse(self, rawval: str | None) -> Value:
-        """
-        Parses the raw input string into the target Value.
-        When a None is passed, which means the field is not supplied.
-        """
-        if rawval is None:
-            if self.required:
-                # Same to :meth:`directives.unchanged_required`.
-                raise ValueError('argument required but none supplied')
-            if self.form:
-                # Return a empty container when a None value is optional.
-                return self.form.rtype()
-            if self.etype is bool:
-                # Special case: A single bool field is valid even when
-                # value is not supplied.
-                return Registry._bool_conv(rawval)
-            return None
-
-        # Strip whitespace. TODO: supported unchanged?
-        rawval = rawval.strip()
-
-        try:
-            conv = Registry.convs[self.etype]
-
-            if self.form is None:
-                # Parse as scalar
-                return conv(rawval)
-
-            # Parse as container
-            if self.form.sep == ' ':
-                items = rawval.split()  # split by arbitrary whitespace
-            elif self.form.sep == '':
-                items = list(rawval)  # split by char
-            else:
-                items = rawval.split(self.form.sep)
-
-            elems = [conv(x.strip()) for x in items if x.strip() != '']
-
-            return self.form.rtype(elems)
-        except ValueError as e:
-            raise ValueError(f"failed to parse '{rawval}' as {self.etype}: {e}")
-
-
-def assert_no_arg_allowed(arg: str) -> None:
-    raise ValueError(f'no argument is allowed; "{arg}" supplied')
-
-
-@dataclasses.dataclass(frozen=True)
+@dataclass(frozen=True)
 class Schema(object):
     name: Field | None
-    attrs: dict[str, Field]
+    attrs: dict[str, Field] | Field
     content: Field | None
+
+    @classmethod
+    def from_dsl(
+        cls,
+        name: str | None = None,
+        attrs: dict[str, str] = {},
+        content: str | None = None,
+    ) -> Self:
+        name_field = Field.from_dsl(name) if name else None
+        attrs_field = {k: Field.from_dsl(v) for k, v in attrs.items()}
+        cont_field = Field.from_dsl(content) if content else None
+
+        return cls(name_field, attrs_field, cont_field)
 
     def _parse_single(
         self, field: tuple[str, Field | None], rawval: str | None
@@ -244,17 +390,56 @@ class Schema(object):
         except Exception as e:
             raise ValueError(f'parsing {field[0]}: {e}')
 
-    def parse(self, raw: Raw) -> Data:
-        name = self._parse_single(('name', self.name), raw.name)
+    def parse(self, data: RawData) -> Data:
+        if data.name:
+            name = self._parse_single(('name', self.name), data.name)
+        else:
+            name = None
 
         attrs = {}
-        rawattrs = raw.attrs.copy()
-        for key, field in self.attrs.items():
-            rawval = rawattrs.pop(key)
-            attrs[key] = self._parse_single(('attrs.' + key, field), rawval)
-        for key, rawval in rawattrs.items():
-            raise ValueError(f'unknown attr: "{key}"')
+        if isinstance(self.attrs, Field):
+            for key, rawval in data.attrs.items():
+                attrs[key] = self._parse_single(('attrs.' + key, self.attrs), rawval)
+        else:
+            rawattrs = data.attrs.copy()
+            for key, field in self.attrs.items():
+                rawval = rawattrs.pop(key)
+                attrs[key] = self._parse_single(('attrs.' + key, field), rawval)
+            for key, rawval in rawattrs.items():
+                raise ValueError(f'unknown attr: "{key}"')
 
-        content = self._parse_single(('content', self.name), raw.content)
+        if data.content:
+            content = self._parse_single(('content', self.content), data.content)
+        else:
+            content = None
 
         return Data(name, attrs, content)
+
+    def fields(
+        self,
+    ) -> Generator[tuple[str, Field]]:
+        if self.name:
+            yield 'name', self.name
+
+        if isinstance(self.attrs, Field):
+            yield 'attrs', self.attrs  # FIXME:
+        else:
+            for name, field in self.attrs.items():
+                yield name, field
+
+        if self.content:
+            yield 'content', self.content
+
+    def items(self, data: Data) -> Generator[tuple[str, Field, Value]]:
+        if self.name:
+            yield 'name', self.name, data.name
+
+        if isinstance(self.attrs, Field):
+            for name, val in data.attrs:
+                yield name, self.attrs, val
+        else:
+            for name, field in self.attrs.items():
+                yield name, field, data.attrs.get(name)
+
+        if self.content:
+            yield 'content', self.content, data.content

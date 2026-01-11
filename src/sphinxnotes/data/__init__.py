@@ -7,42 +7,25 @@ sphinxnotes.dataview
 """
 
 from __future__ import annotations
-from typing import Any
+from typing import cast, override
 
 from docutils import nodes
 from docutils.parsers.rst import directives
-
 from sphinx.util import logging
-from sphinx.util.docutils import SphinxDirective, SphinxRole
+from sphinx.util.docutils import SphinxDirective
 from sphinx.application import Sphinx
-from sphinx.transforms import SphinxTransform
 
 from . import meta
-from .freestyle import FreeStyleDirective, FreeStyleOptionSpec
-from .data import Data, Field, Schema, Raw
-from .render import Template, Phase, render, JinjaEnv
-from .utils import find_current_document, find_current_section, TempData
-from .context_proxy import proxy
+from .data import Field, Schema
+from .template import Template, Phase
+from .render import BaseDataDefineDirective, BaseDataDefineRole
+from .utils.freestyle import FreeStyleDirective, FreeStyleOptionSpec
+from . import preset
 
 logger = logging.getLogger(__name__)
 
-
-class Node(nodes.Element): ...
-
-
-class pending_node(Node, nodes.meta): ...
-
-
-class rendered_node(Node, nodes.container): ...
-
-
-class TemplateStore(TempData[Template]): ...
-
-
-class RawDataStore(TempData[Raw]): ...
-
-
-class SchemaStore(TempData[Schema]): ...
+TEMPLATE_KEY = 'sphinxnotes:template'
+SCHEMA_KEY = 'sphinxnotes:data'
 
 
 class TemplateDirective(SphinxDirective):
@@ -53,199 +36,91 @@ class TemplateDirective(SphinxDirective):
     has_content = True
 
     def run(self) -> list[nodes.Node]:
-        self.assert_has_content()
-
-        tmpl = Template(
+        self.env.temp_data[TEMPLATE_KEY] = Template(
             text='\n'.join(self.content),
             phase=self.options.get('on', Phase.default()),
             debug='debug' in self.options,
         )
-        TemplateStore.set(self.state.document, tmpl)
 
         return []
 
 
-class DataSchemaDirective(FreeStyleDirective):
+class SchemaDirective(FreeStyleDirective):
     optional_arguments = 1
     option_spec = FreeStyleOptionSpec()
     has_content = True
 
     def run(self) -> list[nodes.Node]:
-        if self.arguments:
-            name = Field.from_str(self.arguments[0])
-        else:
-            name = None
-
+        name = Field.from_dsl(self.arguments[0]) if self.arguments else None
         attrs = {}
         for k, v in self.options.items():
-            attrs[k] = Field.from_str(v)
+            attrs[k] = Field.from_dsl(v)
+        content = Field.from_dsl(self.content[0]) if self.content else None
 
-        if self.content:
-            content = Field.from_str(self.content[0])
-        else:
-            content = None
-
-        schema = Schema(name, attrs, content)
-        SchemaStore.set(self.state.document, schema)
+        self.env.temp_data[SCHEMA_KEY] = Schema(name, attrs, content)
 
         return []
 
 
-def markup_context(v: SphinxDirective | SphinxRole | nodes.Element) -> dict[str, Any]:
-    ctx = {}
+class FreeDataRole(BaseDataDefineRole):
+    @override
+    def current_template(self) -> Template:
+        tmpl = self.env.temp_data.get(TEMPLATE_KEY, preset.Role.template())
+        return cast(Template, tmpl)
 
-    if isinstance(v, nodes.Element):
-        ctx['_markup'] = {}
-    else:
-        isdir = isinstance(v, SphinxDirective)
-        ctx['_markup'] = {
-            'type': 'directive' if isdir else 'role',
-            'name': v.name,
-            'lineno': v.lineno,
-            'rawtext': v.block_text if isdir else v.rawtext,
-        }
-    return ctx
+    @override
+    def current_schema(self) -> Schema:
+        schema = self.env.temp_data.get(SCHEMA_KEY, preset.Role.schema())
+        return cast(Schema, schema)
 
 
-def doctree_context(v: SphinxDirective | SphinxRole | nodes.Element) -> dict[str, Any]:
-    ctx = {}
-    if isinstance(v, nodes.Element):
-        ctx['_doc'] = proxy(find_current_document(v))
-        ctx['_section'] = proxy(find_current_section(v))
-    else:
-        isdir = isinstance(v, SphinxDirective)
-        state = v.state if isdir else v.inliner
-        ctx['_doc'] = proxy(state.document)
-        ctx['_section'] = proxy(find_current_section(state.parent))
-    return ctx
-
-
-def sphinx_context(v: SphinxDirective | SphinxRole | SphinxTransform) -> dict[str, Any]:
-    ctx = {}
-    ctx['_env'] = proxy(v.env)
-    ctx['_config'] = proxy(v.config)
-    return ctx
-
-
-class DataDefineDirective(FreeStyleDirective):
+class FreeDataDirective(BaseDataDefineDirective, FreeStyleDirective):
     optional_arguments = 1
     has_content = True
 
-    def run(self) -> list[nodes.Node]:
-        tmpl = TemplateStore.get(self.state.document)
-        if tmpl is None:
-            return []
+    @override
+    def current_template(self) -> Template:
+        tmpl = self.env.temp_data.get(TEMPLATE_KEY, preset.Directive.template())
+        return cast(Template, tmpl)
 
-        schema = SchemaStore.get(self.state.document)
-        rawdata = self._raw_data()
-
-        if tmpl.phase != Phase.Parsing:
-            n = pending_node()
-            RawDataStore.set(n, rawdata)
-            TemplateStore.set(n, tmpl)
-            if schema:
-                SchemaStore.set(n, schema)
-            return [n]
-
-        if schema:
-            try:
-                data = schema.parse(rawdata)
-            except ValueError as e:
-                raise self.error(str(e))
-        else:
-            data = Data.from_raw(rawdata)
-
-        extra_ctx = {
-            **sphinx_context(self),
-            **doctree_context(self),
-            **markup_context(self),
-        }
-        n = render(self.parse_text_to_nodes, tmpl, data, extra_ctx)
-
-        return [n]
-
-    def _raw_data(self) -> Raw:
-        return Raw(
-            self.arguments[0] if self.arguments else None,
-            self.options.copy(),
-            '\n'.join(self.content),
-        )
+    @override
+    def current_schema(self) -> Schema:
+        schema = self.env.temp_data.get(SCHEMA_KEY, preset.Directive.schema())
+        return cast(Schema, schema)
 
 
-class ParsedHookDirective(SphinxDirective):
-    def run(self) -> list[nodes.Node]:
-        for pending in self.state.document.findall(pending_node):
-            tmpl = TemplateStore.get(pending)
-            schema = SchemaStore.get(pending)
-            rawdata = RawDataStore.get(pending)
-
-            assert tmpl
-            assert rawdata
-
-            if schema:
-                try:
-                    data = schema.parse(rawdata)
-                except ValueError as e:
-                    raise self.error(str(e))
-            else:
-                data = Data.from_raw(rawdata)
-
-            extra_ctx = {
-                **sphinx_context(self),
-                **doctree_context(pending),
-                **markup_context(pending),
-            }
-            n = render(self.parse_text_to_nodes, tmpl, data, extra_ctx)
-            pending.replace_self(n)
-
-        return []  # nothing to return
-
-
-def on_source_read(app, docname, content):
-    # NOTE: content is a single element list, representing the content of the
-    # source file.
-    #
-    # .. seealso:: https://www.sphinx-doc.org/en/master/extdev/event_callbacks.html#event-source-read
-    content[-1] = content[-1] + '\n\n.. data:parsed-hook::'
-
-
-class ResolvingHookTransform(SphinxTransform):
-    default_priority = 210  # 在主要处理阶段运行
-
-    def apply(self, **kwargs):
-        for pending in self.document.findall(pending_node):
-            tmpl = TemplateStore.get(pending)
-            schema = SchemaStore.get(pending)
-            rawdata = RawDataStore.get(pending)
-
-            assert tmpl
-            assert rawdata
-
-            if schema:
-                try:
-                    data = schema.parse(rawdata)
-                except ValueError:
-                    continue  # FIXME
-            else:
-                data = Data.from_raw(rawdata)
-
-            n = render(self.parse_text_to_nodes, tmpl, data, {})
-            pending.replace_self(n)
+# class AutoFreeDataDirective(FreeDataDirective):
+#     @override
+#     def process_pending_node(self, n: pending_node) -> None:
+#         n.name_external = n.content_external = True
+#
+#     @override
+#     def current_template(self) -> Template:
+#         tmpl = super().current_template()
+#         tmpl.debug = True
+#         tmpl.phase = Phase.Parsed
+#         return tmpl
 
 
 def setup(app: Sphinx):
     meta.pre_setup(app)
 
-    app.add_directive('data:tmpl', TemplateDirective, False)
-    app.add_directive('data:schema', DataSchemaDirective, False)
-    # app.add_directive('data:use-tmpl', DataTemplateDirective, False)
-    app.add_directive('data:def', DataDefineDirective, False)
-    app.add_directive('data:parsed-hook', ParsedHookDirective, False)
+    from . import template
+    from . import render
 
-    app.connect('source-read', on_source_read)
+    template.setup(app)
+    render.setup(app)
 
-    app.add_transform(ResolvingHookTransform)
+    app.add_config_value('data_template_debug', True, types=bool, rebuild='')
 
-    JinjaEnv.setup(app)
+    app.add_directive('data.tmpl', TemplateDirective)
+    app.add_directive('data.template', TemplateDirective)
+    app.add_directive('data.schema', SchemaDirective)
+    app.add_directive('data', FreeDataDirective)
+
+    app.add_role('data', FreeDataRole())
+
+    # app.add_directive('data.dir', TemplateDirective, False)
+    # app.add_directive('data.role', TemplateDirective, False)
 
     return meta.post_setup(app)

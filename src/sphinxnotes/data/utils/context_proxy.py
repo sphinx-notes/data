@@ -4,9 +4,11 @@ from typing import Any, Callable
 from types import MappingProxyType
 
 from docutils import nodes
-
 from sphinx.util import logging
 from sphinx.config import Config as SphinxConfig
+
+from ..utils import find_first_child
+
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +100,7 @@ class Node(Proxy):
 class NodeWithTitle(Node):
     @proxy_property
     def title(self) -> Node | None:
-        return self._obj.next_node(nodes.Titular)
+        return find_first_child(self._obj, nodes.Titular)  # type: ignore
 
 
 @dataclass(frozen=True)
@@ -128,7 +130,7 @@ class Document(NodeWithTitle):
 
 
 @dataclass(frozen=True)
-class ConfigProxy(Proxy):
+class Config(Proxy):
     _obj: SphinxConfig
 
 
@@ -139,7 +141,7 @@ TYPE_REGISTRY: dict[type | tuple[type, ...], type[Proxy]] = {
 SPECIFIC_TYPE_REGISTRY: dict[type, type[Proxy]] = {
     nodes.document: Document,
     nodes.section: Section,
-    SphinxConfig: ConfigProxy,
+    SphinxConfig: Config,
 }
 
 

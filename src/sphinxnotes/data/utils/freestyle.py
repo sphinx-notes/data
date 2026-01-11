@@ -9,7 +9,7 @@ from docutils.parsers.rst.states import Body
 from sphinx.util import logging
 from sphinx.util.docutils import SphinxDirective
 
-from .utils import parse_text_to_nodes
+from ..utils import parse_text_to_nodes
 
 logger = logging.getLogger(__name__)
 
