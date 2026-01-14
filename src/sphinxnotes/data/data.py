@@ -225,9 +225,6 @@ class Data:
     def ascontext(self) -> dict[str, Any]:
         return asdict(self)
 
-    def title(self) -> str | None:
-        return ValueWrapper(self.name).as_str()
-
 
 @dataclass
 class Field:
