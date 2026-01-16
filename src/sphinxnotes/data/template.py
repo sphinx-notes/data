@@ -46,18 +46,17 @@ class Template(object):
     debug: bool
 
     def render(
-        self, parser: MarkupParser, ctx: Context, extra: list[Context] = []
+        self, parser: MarkupParser, ctx: Context, extra: dict[str, Context] = []
     ) -> list[nodes.Node]:
         mainctx = self._resolve(ctx)
         finalctx = mainctx.copy()
 
         dropped_keys = set()
-        for ectx in extra:
-            for k, v in self._resolve(ectx):
-                if k in mainctx:
-                    dropped_keys.add(k)
-                    continue
-                finalctx[k] = v
+        for name, ectx in extra.items():
+            if name in finalctx:
+                dropped_keys.add(name)
+                continue
+            finalctx[name] = self._resolve(ectx)
 
         text = self._render(mainctx)
         ns = parser(text)

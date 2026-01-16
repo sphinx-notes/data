@@ -14,21 +14,14 @@ if TYPE_CHECKING:
     from sphinx.util.docutils import SphinxDirective, SphinxRole
 
 
-def markup(v: SphinxDirective | SphinxRole | nodes.Element) -> dict[str, Any]:
-    ctx = {}
-
-    if isinstance(v, nodes.Element):
-        ctx['_markup'] = {}
-    else:
-        isdir = isinstance(v, SphinxDirective)
-        ctx['_markup'] = {
-            'type': 'directive' if isdir else 'role',
-            'name': v.name,
-            'lineno': v.lineno,
-            'rawtext': v.block_text if isdir else v.rawtext,
-        }
-    return ctx
-
+def markup(v: SphinxDirective | SphinxRole) -> dict[str, Any]:
+    isdir = isinstance(v, SphinxDirective)
+    return {
+        'type': 'directive' if isdir else 'role',
+        'name': v.name,
+        'lineno': v.lineno,
+        'rawtext': v.block_text if isdir else v.rawtext,
+    }
 
 def doctree(v: SphinxDirective | SphinxRole | nodes.Node) -> dict[str, Any]:
     ctx = {}
@@ -50,4 +43,3 @@ def sphinx(v: SphinxDirective | SphinxRole | SphinxTransform) -> dict[str, Any]:
     return ctx
 
 EXTRACTX_REGISTRY.add_parse_generator(Phase.Parsing, markup)
-EXTRACTX_REGISTRY.add_parse_generator(Phase.Parsed, markup)
