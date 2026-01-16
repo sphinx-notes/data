@@ -125,7 +125,11 @@ class Reporter(nodes.system_message):
         self.report(bullet_list)
 
 
-class NotPicklable:
+class Unpicklable:
+    """
+    Make objects unpickable to prevent them from being stored in the
+    on-disk doctree.
+    """
     def __reduce_ex__(self, protocol):
         # Prevent pickling explicitly
-        raise pickle.PicklingError('This object is not picklable')
+        raise pickle.PicklingError('This object is unpicklable')

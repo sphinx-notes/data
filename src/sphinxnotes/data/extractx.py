@@ -1,12 +1,19 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, override
+from typing import override
 
 from sphinx.util.docutils import SphinxDirective, SphinxRole
 from sphinx.transforms import SphinxTransform
 
-from .utils import find_current_document, find_current_section
+from .utils import find_current_section
 from .utils.ctxproxy import proxy
-from .render import EXTRACTX_REGISTRY, ParsePhaseContextGenerator, FullPhaseContextGenerator, ParseCaller, Caller, pending_node
+from .render import (
+    EXTRACTX_REGISTRY,
+    ParsePhaseContextGenerator,
+    FullPhaseContextGenerator,
+    ParseCaller,
+    Caller,
+    pending_node,
+)
 from .template import Context
 
 
@@ -20,6 +27,7 @@ class MarkupContextGenerator(ParsePhaseContextGenerator):
             'lineno': caller.lineno,
             'rawtext': caller.block_text if isdir else caller.rawtext,
         }
+
 
 class DocContextGenerator(FullPhaseContextGenerator):
     @override
@@ -52,13 +60,15 @@ class SphinxEnvContextGenerator(FullPhaseContextGenerator):
     def generate(self, caller: Caller, n: pending_node) -> Context:
         return proxy(caller.env)
 
+
 class SphinxConfigContextGenerator(FullPhaseContextGenerator):
     @override
     def generate(self, caller: Caller, n: pending_node) -> Context:
         return proxy(caller.config)
 
+
 EXTRACTX_REGISTRY.add_parsing_phase_context('markup', MarkupContextGenerator())
 EXTRACTX_REGISTRY.add_full_phase_context('doc', DocContextGenerator())
-EXTRACTX_REGISTRY.add_full_phase_context('section',SectionContextGenerator())
+EXTRACTX_REGISTRY.add_full_phase_context('section', SectionContextGenerator())
 EXTRACTX_REGISTRY.add_full_phase_context('env', SphinxEnvContextGenerator())
 EXTRACTX_REGISTRY.add_full_phase_context('config', SphinxConfigContextGenerator())

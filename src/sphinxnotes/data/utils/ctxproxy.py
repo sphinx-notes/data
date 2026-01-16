@@ -8,6 +8,7 @@ from sphinx.util import logging
 from sphinx.config import Config as SphinxConfig
 
 from ..utils import find_first_child
+from ..utils import Unpicklable
 
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,15 @@ def proxy_property(func: Callable[[Any], Any]) -> property:
 
 
 @dataclass(frozen=True)
-class Proxy:
+class Proxy(Unpicklable):
+    """
+    Proxy complex objects into context for convenient and secure access within
+    Jinja templates.
+
+    Porxy might point to very complex, unpredictable objects, therefore
+    disallowing pickling is necessary.
+    """
+
     _obj: Any
 
     def __getattr__(self, name: str) -> Any:
@@ -49,28 +58,16 @@ class Proxy:
 
     @staticmethod
     def _normalize(val: Any) -> Any:
-        """
-        对显式 property 的返回值做模板安全化处理：
-        - 标量原样返回；
-        - 已是 ContextProxy 原样返回；
-        - 注册类型自动 wrap；
-        - 容器转换为不可变快照并递归处理；
-        - 其他对象默认转 str。
-        """
-        # 标量
         if val is None or isinstance(val, (str, int, float, bool)):
             return val
 
-        # 已包装过
         if isinstance(val, Proxy):
             return val
 
-        # 注册类型自动 wrap
         wrapped_val = Proxy._wrap(val)
         if wrapped_val is not val:
             return wrapped_val
 
-        # 容器
         if isinstance(val, (set, frozenset)):
             return frozenset(Proxy._normalize(x) for x in val)
         if isinstance(val, (list, tuple)):
@@ -78,8 +75,6 @@ class Proxy:
         if isinstance(val, dict):
             copied = {k: Proxy._normalize(v) for k, v in val.items()}
             return MappingProxyType(copied)
-
-        # 其他对象：安全起见转成字符串
         return str(val)
 
 

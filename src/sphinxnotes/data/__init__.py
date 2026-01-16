@@ -86,6 +86,7 @@ class Registry:
 
 REGISTRY = Registry()
 
+
 def setup(app: Sphinx):
     meta.pre_setup(app)
 

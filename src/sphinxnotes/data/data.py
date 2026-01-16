@@ -212,7 +212,7 @@ REGISTRY = Registry()
 
 class Data(ABC):
     @abstractmethod
-    def as_context(self) -> dict[str, Any]: ...
+    def asdict(self) -> dict[str, Any]: ...
 
 
 @dataclass
@@ -228,7 +228,7 @@ class ParsedData:
     attrs: dict[str, Value]
     content: Value
 
-    def as_context(self) -> dict[str, Any]:
+    def asdict(self) -> dict[str, Any]:
         """
         Convert Data to a dict for usage of Jinja2 context.
 
@@ -251,17 +251,13 @@ class ParsedData:
 class PendingData(Data):
     raw: RawData
     schema: Schema
-    _data: ParsedData | None = dataclass_field(init=False, default=None)
 
     def parse(self) -> ParsedData:
-        if self._data:
-            return self._data
-        self._data = self.schema.parse(self.raw)
-        return self._data
+        return self.schema.parse(self.raw)
 
     @override
-    def as_context(self) -> dict[str, Any]:
-        return self.parse().as_context()
+    def asdict(self) -> dict[str, Any]:
+        return self.parse().asdict()
 
 
 @dataclass

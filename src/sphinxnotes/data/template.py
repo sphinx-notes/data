@@ -1,5 +1,6 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
+from os import wait
 from pprint import pformat
 from typing import TYPE_CHECKING
 from enum import Enum
@@ -12,11 +13,9 @@ from jinja2 import StrictUndefined, DebugUndefined
 
 from .data import Data
 from .utils import Reporter
-from .utils.ctxproxy import Proxy
 
 if TYPE_CHECKING:
     from typing import Any, Callable
-    from .utils.ctxproxy import Proxy
     from sphinx.builders import Builder
     from sphinx.application import Sphinx
 
@@ -24,7 +23,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 type MarkupParser = Callable[[str], list[nodes.Node]]
-
 
 class Phase(Enum):
     Parsing = 'parsing'
@@ -42,7 +40,8 @@ class Phase(Enum):
         return cls[choice.title()]
 
 
-type Context = Data | dict[str, Any] | Proxy
+type Context = Data | dict[str, Any]
+type ExtraContext = dict[str, Any]
 
 
 @dataclass
@@ -51,36 +50,20 @@ class Template(object):
     phase: Phase
     debug: bool
 
-    def render(
-        self, parser: MarkupParser, ctx: Context, extra: dict[str, Context] = []
-    ) -> list[nodes.Node]:
-        mainctx = self._resolve(ctx)
-        finalctx = mainctx.copy()
-
-        dropped_keys = set()
-        for name, ectx in extra.items():
-            if name in finalctx:
-                dropped_keys.add(name)
-                continue
-            finalctx[name] = self._resolve(ectx)
-
+    def render(self, parser: MarkupParser, ctx: dict[str, Any],
+               extra: dict[str, Any] = {}) -> list[nodes.Node]:
+        finalctx = self._merge_ctx(ctx)
         text = self._render(finalctx)
         ns = parser(text)
 
         if self.debug:
             reporter = Reporter('Template debug report')
 
-            reporter.text('Data:')
-            reporter.code(pformat(ctx), lang='python')
-
             reporter.text('Main context:')
-            reporter.code(pformat(mainctx), lang='python')
+            reporter.code(pformat(ctx.main), lang='python')
 
             reporter.text('Extra context keys:')
-            reporter.list(set(finalctx.keys()) - set(mainctx.keys()))
-
-            reporter.text('Dropped extra conetxt keys:')
-            reporter.list(dropped_keys)
+            reporter.code(pformat(ctx.extra.keys()), lang='python')
 
             reporter.text(f'Template (phase: {self.phase}, debug: {self.debug}):')
             reporter.code(self.text, lang='jinja')
@@ -92,13 +75,22 @@ class Template(object):
 
         return ns
 
-    def _resolve(self, ctx: Context) -> dict[str, Any] | Proxy:
-        if isinstance(ctx, Data):
-            return ctx.as_context()
+
+    def _merge_ctx(self, ctx: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+        if isinstance(ctx.main, Data):
+            finalctx = ctx.main.asdict()
         elif isinstance(ctx, dict):
-            return ctx
-        if isinstance(ctx, Proxy):
-            return ctx
+            finalctx = ctx.main.copy()
+        else:
+            assert False
+
+        for name, ectx in ctx.extra.items():
+            if name in finalctx:
+                continue
+            finalctx[name] = ectx
+
+        return finalctx
+
 
     def _render(self, ctx: dict[str, Any]) -> str:
         extensions = [
