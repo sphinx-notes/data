@@ -11,11 +11,13 @@ Module for rendering data to doctree nodes.
 from __future__ import annotations
 from typing import TYPE_CHECKING, override
 
+from docutils import nodes
 from docutils.parsers.rst import directives
 
-from .data import Field, Schema
-from .template import Template
-from .render import BaseDataDefineDirective
+from .data import RawData, PendingData, Field, Schema
+from .template import Template, Phase
+from .render import BaseDataDefineDirective, pending_node
+from .utils import find_titular_node_upward
 
 class StrictDataDefineDirective(BaseDataDefineDirective):
     final_argument_whitespace = True

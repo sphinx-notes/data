@@ -50,7 +50,7 @@ Introduction
 
    {{ content }} 
 
-.. data:: Shengyu Zhang
+.. data::
    :github: SilverRainZ
    :homepage: https://silverrainz.me/
 

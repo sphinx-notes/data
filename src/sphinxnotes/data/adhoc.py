@@ -67,7 +67,9 @@ class SchemaDefineDirective(FreeStyleDirective):
         return []
 
 
-class FreeDataDefineDirective(BaseDataDefineDirective, FreeStyleDirective):
+from .auto import AutoDataDefineDirective
+
+class FreeDataDefineDirective(AutoDataDefineDirective, FreeStyleDirective):
     optional_arguments = 1
     has_content = True
 
