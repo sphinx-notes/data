@@ -13,7 +13,9 @@ on the fly
 """
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, cast, override
+from typing import TYPE_CHECKING, override
+
+from typing import cast
 
 from docutils import nodes
 from docutils.parsers.rst import directives
@@ -65,6 +67,10 @@ class SchemaDefineDirective(FreeStyleDirective):
         self.env.temp_data[SCHEMA_KEY] = Schema(name, attrs, content)
 
         return []
+
+
+if TYPE_CHECKING:
+    ...
 
 
 class FreeDataDefineDirective(BaseDataDefineDirective, FreeStyleDirective):

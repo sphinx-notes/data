@@ -27,9 +27,7 @@ from .template import Phase, Template
 from .render import (
     Caller,
     pending_node,
-    RenderedNode,
     rendered_node,
-    rendered_inline_node,
     BaseDataDefiner,
     BaseDataDefineRole,
     BaseDataDefineDirective,
@@ -59,9 +57,8 @@ __all__ = [
     'Template',
     'Caller',
     'pending_node',
-    'RenderedNode',
     'rendered_node',
-    'rendered_inline_node',
+    'rendered_node',
     'BaseDataDefiner',
     'BaseDataDefineRole',
     'BaseDataDefineDirective',
@@ -85,6 +82,7 @@ class Registry:
 
 
 REGISTRY = Registry()
+
 
 def setup(app: Sphinx):
     meta.pre_setup(app)

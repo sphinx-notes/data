@@ -9,11 +9,12 @@ Core type definitions.
 """
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 import re
 from dataclasses import dataclass, asdict, field as dataclass_field
 from ast import literal_eval
-from abc import ABC, abstractmethod
+
+from .utils import Unpicklable
 
 if TYPE_CHECKING:
     from typing import Any, Callable, Generator, Self, Literal
@@ -210,11 +211,6 @@ REGISTRY = Registry()
 # ======================
 
 
-class Data(ABC):
-    @abstractmethod
-    def as_context(self) -> dict[str, Any]: ...
-
-
 @dataclass
 class RawData:
     name: str | None
@@ -223,12 +219,21 @@ class RawData:
 
 
 @dataclass
+class PendingData(Unpicklable):
+    raw: RawData
+    schema: Schema
+
+    def parse(self) -> ParsedData:
+        return self.schema.parse(self.raw)
+
+
+@dataclass
 class ParsedData:
     name: Value
     attrs: dict[str, Value]
     content: Value
 
-    def as_context(self) -> dict[str, Any]:
+    def asdict(self) -> dict[str, Any]:
         """
         Convert Data to a dict for usage of Jinja2 context.
 
@@ -245,23 +250,6 @@ class ParsedData:
             if k not in ctx:
                 ctx[k] = v
         return ctx
-
-
-@dataclass
-class PendingData(Data):
-    raw: RawData
-    schema: Schema
-    _data: ParsedData | None = dataclass_field(init=False, default=None)
-
-    def parse(self) -> ParsedData:
-        if self._data:
-            return self._data
-        self._data = self.schema.parse(self.raw)
-        return self._data
-
-    @override
-    def as_context(self) -> dict[str, Any]:
-        return self.parse().as_context()
 
 
 @dataclass

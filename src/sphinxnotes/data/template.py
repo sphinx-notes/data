@@ -10,20 +10,17 @@ from sphinx.util import logging
 from jinja2.sandbox import SandboxedEnvironment
 from jinja2 import StrictUndefined, DebugUndefined
 
-from .data import Data
-from .utils import Reporter
-from .utils.ctxproxy import Proxy
+from .data import ParsedData
+from .utils import Report
+from .renderer import Renderer
 
 if TYPE_CHECKING:
-    from typing import Any, Callable
-    from .utils.ctxproxy import Proxy
+    from typing import Any
     from sphinx.builders import Builder
     from sphinx.application import Sphinx
 
 
 logger = logging.getLogger(__name__)
-
-type MarkupParser = Callable[[str], list[nodes.Node]]
 
 
 class Phase(Enum):
@@ -42,65 +39,69 @@ class Phase(Enum):
         return cls[choice.title()]
 
 
-type Context = Data | dict[str, Any] | Proxy
-
-
 @dataclass
-class Template(object):
+class Template:
     text: str
     phase: Phase
     debug: bool
 
     def render(
-        self, parser: MarkupParser, ctx: Context, extra: dict[str, Context] = []
+        self,
+        renderer: Renderer,
+        data: ParsedData | dict[str, Any],
+        extra: dict[str, Any] = {},
+        inline: bool = False,
     ) -> list[nodes.Node]:
-        mainctx = self._resolve(ctx)
-        finalctx = mainctx.copy()
+        # Main context to dic.
+        if isinstance(data, ParsedData):
+            ctx = data.asdict()
+        elif isinstance(data, dict):
+            ctx = data.copy()
+        else:
+            assert False
 
-        dropped_keys = set()
-        for name, ectx in extra.items():
-            if name in finalctx:
-                dropped_keys.add(name)
-                continue
-            finalctx[name] = self._resolve(ectx)
+        # Merge extra context and main context.
+        conflicts = set()
+        for name, e in extra.items():
+            if name not in ctx:
+                ctx[name] = e
+            else:
+                conflicts.add(name)
 
-        text = self._render(finalctx)
-        ns = parser(text)
+        rendered_text, tmplreport = self._safe_render(ctx)
+        if tmplreport and tmplreport.is_error():
+            return [nodes.Text(rendered_text), tmplreport]
+
+        rendered_nodes = renderer.render(rendered_text, inline=inline)
+
+        if tmplreport:
+            rendered_nodes.append(tmplreport)
 
         if self.debug:
-            reporter = Reporter('Template debug report')
+            dbgreport = Report('Template debug report')
 
-            reporter.text('Data:')
-            reporter.code(pformat(ctx), lang='python')
+            dbgreport.text('Data:')
+            dbgreport.code(pformat(data), lang='python')
 
-            reporter.text('Main context:')
-            reporter.code(pformat(mainctx), lang='python')
+            dbgreport.text('Extra (just key):')
+            dbgreport.code(pformat(list(extra.keys())), lang='python')
 
-            reporter.text('Extra context keys:')
-            reporter.list(set(finalctx.keys()) - set(mainctx.keys()))
+            dbgreport.text('Conflict keys:')
+            dbgreport.code(pformat(list(conflicts)), lang='python')
 
-            reporter.text('Dropped extra conetxt keys:')
-            reporter.list(dropped_keys)
+            self._report_self(dbgreport)
 
-            reporter.text(f'Template (phase: {self.phase}, debug: {self.debug}):')
-            reporter.code(self.text, lang='jinja')
+            dbgreport.text(f'Template (phase: {self.phase}, debug: {self.debug}):')
+            dbgreport.code(self.text, lang='jinja')
 
-            reporter.text('Rendered ndoes:')
-            reporter.code('\n'.join(n.pformat() for n in ns), lang='xml')
+            dbgreport.text('Rendered ndoes:')
+            dbgreport.code('\n'.join(n.pformat() for n in rendered_nodes), lang='xml')
 
-            ns.append(reporter)
+            rendered_nodes.append(dbgreport)
 
-        return ns
+        return rendered_nodes
 
-    def _resolve(self, ctx: Context) -> dict[str, Any] | Proxy:
-        if isinstance(ctx, Data):
-            return ctx.as_context()
-        elif isinstance(ctx, dict):
-            return ctx
-        if isinstance(ctx, Proxy):
-            return ctx
-
-    def _render(self, ctx: dict[str, Any]) -> str:
+    def _safe_render(self, ctx: dict[str, Any]) -> tuple[str, Report | None]:
         extensions = [
             'jinja2.ext.loopcontrols',  # enable {% break %}, {% continue %}
         ]
@@ -113,7 +114,21 @@ class Template(object):
         )
         # TODO: cache jinja env
 
-        return env.from_string(self.text).render(ctx)
+        try:
+            text = env.from_string(self.text).render(ctx)
+        except Exception:
+            reporter = Report('Failed to render Jinja template:', 'ERROR')
+            reporter.text('Context:')
+            reporter.code(pformat(ctx), lang='python')
+            self._report_self(reporter)
+            reporter.excption()
+            return '', reporter
+
+        return text, None
+
+    def _report_self(self, reporter: Report) -> None:
+        reporter.text(f'Template (phase: {self.phase}, debug: {self.debug}):')
+        reporter.code(self.text, lang='jinja')
 
 
 class _JinjaEnv(SandboxedEnvironment):
