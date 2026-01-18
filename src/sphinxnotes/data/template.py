@@ -11,7 +11,7 @@ from jinja2.sandbox import SandboxedEnvironment
 from jinja2 import StrictUndefined, DebugUndefined
 
 from .data import ParsedData
-from .utils import Reporter
+from .utils import Report
 from .renderer import Renderer
 
 if TYPE_CHECKING:
@@ -51,7 +51,7 @@ class Template:
         data: ParsedData | dict[str, Any],
         extra: dict[str, Any] = {},
         inline: bool = False,
-    ) -> tuple[list[nodes.Node], list[Reporter]]:
+    ) -> list[nodes.Node]:
         # Main context to dic.
         if isinstance(data, ParsedData):
             ctx = data.asdict()
@@ -68,38 +68,40 @@ class Template:
             else:
                 conflicts.add(name)
 
-        text, reporter = self._safe_render(ctx)
-        if reporter and reporter.is_error():
-            return [], [reporter]
+        rendered_text, tmplreport = self._safe_render(ctx)
+        if tmplreport and tmplreport.is_error():
+            return [nodes.Text(rendered_text), tmplreport]
 
-        ns, rs = renderer.render(text, inline=inline)
-        # FIXME: reporter is missing
+        rendered_nodes = renderer.render(rendered_text, inline=inline)
+
+        if tmplreport:
+            rendered_nodes.append(tmplreport)
 
         if self.debug:
-            reporter = Reporter('Template debug report')
+            dbgreport = Report('Template debug report')
 
-            reporter.text('Data:')
-            reporter.code(pformat(data), lang='python')
+            dbgreport.text('Data:')
+            dbgreport.code(pformat(data), lang='python')
 
-            reporter.text('Extra (just key):')
-            reporter.code(pformat(list(extra.keys())), lang='python')
+            dbgreport.text('Extra (just key):')
+            dbgreport.code(pformat(list(extra.keys())), lang='python')
 
-            reporter.text('Conflict keys:')
-            reporter.code(pformat(list(conflicts)), lang='python')
+            dbgreport.text('Conflict keys:')
+            dbgreport.code(pformat(list(conflicts)), lang='python')
 
-            self._report_self(reporter)
+            self._report_self(dbgreport)
 
-            reporter.text(f'Template (phase: {self.phase}, debug: {self.debug}):')
-            reporter.code(self.text, lang='jinja')
+            dbgreport.text(f'Template (phase: {self.phase}, debug: {self.debug}):')
+            dbgreport.code(self.text, lang='jinja')
 
-            reporter.text('Rendered ndoes:')
-            reporter.code('\n'.join(n.pformat() for n in ns), lang='xml')
+            dbgreport.text('Rendered ndoes:')
+            dbgreport.code('\n'.join(n.pformat() for n in rendered_nodes), lang='xml')
 
-            rs.append(reporter)
+            rendered_nodes.append(dbgreport)
 
-        return ns, rs
+        return rendered_nodes
 
-    def _safe_render(self, ctx: dict[str, Any]) -> tuple[str, Reporter | None]:
+    def _safe_render(self, ctx: dict[str, Any]) -> tuple[str, Report | None]:
         extensions = [
             'jinja2.ext.loopcontrols',  # enable {% break %}, {% continue %}
         ]
@@ -115,7 +117,7 @@ class Template:
         try:
             text = env.from_string(self.text).render(ctx)
         except Exception:
-            reporter = Reporter('Failed to render Jinja template:', 'ERROR')
+            reporter = Report('Failed to render Jinja template:', 'ERROR')
             reporter.text('Context:')
             reporter.code(pformat(ctx), lang='python')
             self._report_self(reporter)
@@ -124,7 +126,7 @@ class Template:
 
         return text, None
 
-    def _report_self(self, reporter: Reporter) -> None:
+    def _report_self(self, reporter: Report) -> None:
         reporter.text(f'Template (phase: {self.phase}, debug: {self.debug}):')
         reporter.code(self.text, lang='jinja')
 

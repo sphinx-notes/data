@@ -19,7 +19,7 @@ from sphinx.util import logging
 from sphinx.util.docutils import SphinxDirective, SphinxRole
 from sphinx.transforms import SphinxTransform
 
-from .utils import Reporter
+from .utils import Report
 
 if TYPE_CHECKING:
     ...
@@ -33,15 +33,18 @@ class Renderer:
     def __init__(self, v: SphinxDirective | SphinxRole | SphinxTransform) -> None:
         self.v = v
 
-    def render(
-        self, text: str, inline: bool = False
-    ) -> tuple[list[Node], list[Reporter]]:
+    def render(self, text: str, inline: bool = False) -> list[Node]:
         if inline:
-            return self._render(text)
-        else:
             return self._render_inline(text)
+        else:
+            ns = self._render(text)
+            logger.warning('================ %s', len(ns))
+            for n in ns:
+                logger.warning('================ %s', type(n))
+                print(n.pformat())
+            return ns
 
-    def _render(self, text: str) -> tuple[list[Node], list[Reporter]]:
+    def _render(self, text: str) -> list[Node]:
         v = self.v
         if isinstance(v, SphinxDirective):
             return self._safe_render(v.parse_text_to_nodes, text)
@@ -61,7 +64,7 @@ class Renderer:
         else:
             assert False
 
-    def _render_inline(self, text: str) -> tuple[list[Node], list[Reporter]]:
+    def _render_inline(self, text: str) -> list[Node]:
         v = self.v
         if isinstance(v, SphinxDirective):
             return self._safe_render_inline(v.parse_inline, text)
@@ -79,41 +82,39 @@ class Renderer:
         elif isinstance(v, SphinxTransform):
             # Fallback to normal non-inline render then extract inline
             # elements by self.
-            ns, rs = self._render(text)
+            # FIXME: error seems be ignored?
+            ns = self._render(text)
             if ns and isinstance(ns[0], nodes.paragraph):
                 ns = ns[0].children
-            return ns, rs
+            return ns
         else:
             assert False
 
-    def _safe_render(
-        self, fn: Callable[[str], list[Node]], text: str
-    ) -> tuple[list[Node], list[Reporter]]:
+    def _safe_render(self, fn: Callable[[str], list[Node]], text: str) -> list[Node]:
         try:
             ns = fn(text)
         except Exception:
-            reporter = Reporter('Failed to render the follwing text to nodes', 'ERROR')
-            reporter.code(text)
-            return [], [reporter]
-        return ns, []
+            report = Report('Failed to render the follwing text to nodes', 'ERROR')
+            report.code(text)
+            return [report]
+        return ns
 
     def _safe_render_inline(
         self, fn: Callable[[str], tuple[list[Node], list[system_message]]], text: str
-    ) -> tuple[list[Node], list[Reporter]]:
+    ) -> list[Node]:
         try:
             ns, msgs = fn(text)
         except Exception:
-            reporter = Reporter(
+            report = Report(
                 'Failed to render the follwing text to inline nodes', 'ERROR'
             )
-            reporter.code(text)
-            return [], [reporter]
+            report.code(text)
+            return [report]
 
         # Convert system_message to Reporter.
-        rs = []
         for msg in msgs:
-            r = Reporter('Parser generated message:', 'WARNING')
+            r = Report('Parser generated message:', 'WARNING')
             r += msg.children
-            rs.append(r)
+            ns.append(r)
 
-        return ns, rs
+        return ns

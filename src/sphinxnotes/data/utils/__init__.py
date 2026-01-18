@@ -83,7 +83,7 @@ def find_titular_node_upward(node: nodes.Element | None) -> nodes.Element | None
     return find_titular_node_upward(node.parent)
 
 
-class Reporter(nodes.system_message):
+class Report(nodes.system_message):
     type Level = Literal['DEBUG', 'INFO', 'WARNING', 'ERROR']
 
     level: Level
@@ -97,7 +97,8 @@ class Reporter(nodes.system_message):
         self.log(title)
 
     def empty(self) -> bool:
-        return len(self.children) > 0
+        # title is the only children
+        return len(self.children) <= 1
 
     def report(self, node: nodes.Node) -> None:
         self += node
