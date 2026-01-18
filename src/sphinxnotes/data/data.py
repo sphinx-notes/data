@@ -9,7 +9,7 @@ Core type definitions.
 """
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 import re
 from dataclasses import dataclass, asdict, field as dataclass_field
 from ast import literal_eval
@@ -210,11 +210,13 @@ REGISTRY = Registry()
 # Data, Field and Schema
 # ======================
 
+
 @dataclass
 class RawData:
     name: str | None
     attrs: dict[str, str]
     content: str | None
+
 
 @dataclass
 class PendingData(Unpicklable):
@@ -223,6 +225,7 @@ class PendingData(Unpicklable):
 
     def parse(self) -> ParsedData:
         return self.schema.parse(self.raw)
+
 
 @dataclass
 class ParsedData:

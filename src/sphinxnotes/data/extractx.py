@@ -17,6 +17,7 @@ from .render import (
 if TYPE_CHECKING:
     from typing import Any
 
+
 class MarkupContextGenerator(ParsePhaseContextGenerator):
     @override
     def generate(self, caller: ParseCaller) -> Any:

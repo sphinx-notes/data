@@ -12,16 +12,16 @@ from jinja2 import StrictUndefined, DebugUndefined
 
 from .data import ParsedData
 from .utils import Reporter
+from .renderer import Renderer
 
 if TYPE_CHECKING:
-    from typing import Any, Callable
+    from typing import Any
     from sphinx.builders import Builder
     from sphinx.application import Sphinx
 
 
 logger = logging.getLogger(__name__)
 
-type MarkupParser = Callable[[str], list[nodes.Node]]
 
 class Phase(Enum):
     Parsing = 'parsing'
@@ -45,10 +45,13 @@ class Template:
     phase: Phase
     debug: bool
 
-    def render(self, parser: MarkupParser,
-               data: ParsedData | dict[str, Any],
-               extra: dict[str, Any] = {}) -> list[nodes.Node]:
-
+    def render(
+        self,
+        renderer: Renderer,
+        data: ParsedData | dict[str, Any],
+        extra: dict[str, Any] = {},
+        inline: bool = False,
+    ) -> tuple[list[nodes.Node], list[Reporter]]:
         # Main context to dic.
         if isinstance(data, ParsedData):
             ctx = data.asdict()
@@ -60,13 +63,17 @@ class Template:
         # Merge extra context and main context.
         conflicts = set()
         for name, e in extra.items():
-            if name not in ctx: 
+            if name not in ctx:
                 ctx[name] = e
             else:
                 conflicts.add(name)
 
-        text = self._render(ctx)
-        ns = parser(text)
+        text, reporter = self._safe_render(ctx)
+        if reporter and reporter.is_error():
+            return [], [reporter]
+
+        ns, rs = renderer.render(text, inline=inline)
+        # FIXME: reporter is missing
 
         if self.debug:
             reporter = Reporter('Template debug report')
@@ -80,18 +87,19 @@ class Template:
             reporter.text('Conflict keys:')
             reporter.code(pformat(list(conflicts)), lang='python')
 
+            self._report_self(reporter)
+
             reporter.text(f'Template (phase: {self.phase}, debug: {self.debug}):')
             reporter.code(self.text, lang='jinja')
 
             reporter.text('Rendered ndoes:')
             reporter.code('\n'.join(n.pformat() for n in ns), lang='xml')
 
-            ns.append(reporter)
+            rs.append(reporter)
 
-        return ns
+        return ns, rs
 
-
-    def _render(self, ctx: dict[str, Any]) -> str:
+    def _safe_render(self, ctx: dict[str, Any]) -> tuple[str, Reporter | None]:
         extensions = [
             'jinja2.ext.loopcontrols',  # enable {% break %}, {% continue %}
         ]
@@ -104,7 +112,21 @@ class Template:
         )
         # TODO: cache jinja env
 
-        return env.from_string(self.text).render(ctx)
+        try:
+            text = env.from_string(self.text).render(ctx)
+        except Exception:
+            reporter = Reporter('Failed to render Jinja template:', 'ERROR')
+            reporter.text('Context:')
+            reporter.code(pformat(ctx), lang='python')
+            self._report_self(reporter)
+            reporter.excption()
+            return '', reporter
+
+        return text, None
+
+    def _report_self(self, reporter: Reporter) -> None:
+        reporter.text(f'Template (phase: {self.phase}, debug: {self.debug}):')
+        reporter.code(self.text, lang='jinja')
 
 
 class _JinjaEnv(SandboxedEnvironment):

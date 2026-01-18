@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, TypeVar, cast
 import pickle
+import traceback
 
 from docutils import nodes
 from docutils.frontend import get_default_settings
@@ -83,14 +84,16 @@ def find_titular_node_upward(node: nodes.Element | None) -> nodes.Element | None
 
 
 class Reporter(nodes.system_message):
-    level: str
+    type Level = Literal['DEBUG', 'INFO', 'WARNING', 'ERROR']
+
+    level: Level
 
     def __init__(
-        self,
-        title: str,
-        level: Literal['DEBUG', 'INFO', 'WARNING', 'ERROR'] = 'DEBUG',
+        self, title: str, level: Level = 'DEBUG', *children, **attributes
     ) -> None:
-        super().__init__(title + ':', type=level, level=2, source='')
+        super().__init__(
+            title + ':', type=level, level=2, source='', *children, **attributes
+        )
         self.log(title)
 
     def empty(self) -> bool:
@@ -127,12 +130,20 @@ class Reporter(nodes.system_message):
 
         self.report(bullet_list)
 
+    def excption(self) -> None:
+        self.text('Exception:')
+        self.code(traceback.format_exc())
+
+    def is_error(self) -> bool:
+        return self.level == 'ERROR'
+
 
 class Unpicklable:
     """
     Make objects unpickable to prevent them from being stored in the
     on-disk doctree.
     """
+
     def __reduce_ex__(self, protocol):
         # Prevent pickling explicitly
         raise pickle.PicklingError('This object is unpicklable')

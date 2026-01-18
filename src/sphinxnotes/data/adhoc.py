@@ -21,7 +21,6 @@ from sphinx.util.docutils import SphinxDirective
 
 from .data import Field, Schema
 from .template import Template, Phase
-from .render import BaseDataDefineDirective
 from .utils.freestyle import FreeStyleDirective, FreeStyleOptionSpec
 from . import preset
 
@@ -68,6 +67,7 @@ class SchemaDefineDirective(FreeStyleDirective):
 
 
 from .auto import AutoDataDefineDirective
+
 
 class FreeDataDefineDirective(AutoDataDefineDirective, FreeStyleDirective):
     optional_arguments = 1
