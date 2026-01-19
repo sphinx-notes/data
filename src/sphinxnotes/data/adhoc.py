@@ -22,8 +22,9 @@ from docutils.parsers.rst import directives
 from sphinx.util.docutils import SphinxDirective
 
 from .data import Field, Schema
-from .template import Template, Phase
-from .render import BaseDataDefineDirective
+from .render.template import Template
+from .render.nodes import Phase
+from .render import BaseDataDefineDirective, BaseDataDefineRole
 from .utils.freestyle import FreeStyleDirective, FreeStyleOptionSpec
 from . import preset
 
@@ -35,19 +36,20 @@ TEMPLATE_KEY = 'sphinxnotes-data:template'
 SCHEMA_KEY = 'sphinxnotes-data:schema'
 
 
+def phase_option_spec(arg):
+    choice = directives.choice(arg, [x.value for x in Phase])
+    return Phase[choice.title()]
+
+
 class TemplateDefineDirective(SphinxDirective):
     option_spec = {
-        'on': Phase.option_spec,
+        'on': phase_option_spec,
         'debug': directives.flag,
     }
     has_content = True
 
     def run(self) -> list[nodes.Node]:
-        self.env.temp_data[TEMPLATE_KEY] = Template(
-            text='\n'.join(self.content),
-            phase=self.options.get('on', Phase.default()),
-            debug='debug' in self.options,
-        )
+        self.env.temp_data[TEMPLATE_KEY] = Template('\n'.join(self.content))
 
         return []
 
@@ -69,11 +71,7 @@ class SchemaDefineDirective(FreeStyleDirective):
         return []
 
 
-if TYPE_CHECKING:
-    ...
-
-
-class FreeDataDefineDirective(BaseDataDefineDirective, FreeStyleDirective):
+class AdhocDataDefineDirective(BaseDataDefineDirective, FreeStyleDirective):
     optional_arguments = 1
     has_content = True
 
@@ -88,7 +86,21 @@ class FreeDataDefineDirective(BaseDataDefineDirective, FreeStyleDirective):
         return cast(Schema, schema)
 
 
+class AdhocDataDefineRole(BaseDataDefineRole):
+    @override
+    def current_template(self) -> Template:
+        tmpl = self.env.temp_data.get(TEMPLATE_KEY, preset.Directive.template())
+        return cast(Template, tmpl)
+
+    @override
+    def current_schema(self) -> Schema:
+        schema = self.env.temp_data.get(SCHEMA_KEY, preset.Directive.schema())
+        return cast(Schema, schema)
+
+
 def setup(app: Sphinx):
     app.add_directive('template', TemplateDefineDirective)
     app.add_directive('schema', SchemaDefineDirective)
-    app.add_directive('data', FreeDataDefineDirective)
+    app.add_directive('data', AdhocDataDefineDirective)
+
+    app.add_role('data', AdhocDataDefineRole())

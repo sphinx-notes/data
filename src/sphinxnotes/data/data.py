@@ -97,7 +97,7 @@ def _bool_conv(v: str | None) -> bool:
     if v in ('false', 'no', '0', 'off', 'n', None):
         return False
     # Same to :meth:`directives.flag`.
-    raise ValueError(f'no argument is allowed; "{v}" supplied')
+    raise ValueError(f'No argument is allowed; "{v}" supplied')
 
 
 def _str_conv(v: str) -> str:
@@ -172,7 +172,7 @@ class Registry:
         self, name: str, ctype: type, sep: str, aliases: list[str] = []
     ) -> None:
         if ctype not in self.ctypes:
-            raise ValueError(f'unsupported type: "{ctype}". available: {self.ctypes}')
+            raise ValueError(f'Unsupported type: "{ctype}". Available: {self.ctypes}')
 
         form = Form(ctype, sep)
 
@@ -297,7 +297,7 @@ class Field:
         if rawval is None:
             if self.required:
                 # Same to :meth:`directives.unchanged_required`.
-                raise ValueError('argument required but none supplied')
+                raise ValueError('Argument required but none supplied')
             if self.ctype:
                 # Return a empty container when a None value is optional.
                 return self.ctype()
@@ -329,7 +329,7 @@ class Field:
 
             return self.ctype(elems)
         except ValueError as e:
-            raise ValueError(f"failed to parse '{rawval}' as {self.etype}: {e}") from e
+            raise ValueError(f"Failed to parse '{rawval}' as {self.etype}: {e}") from e
 
     def __getattr__(self, name: str) -> Value:
         if name in self.flags:
@@ -382,13 +382,13 @@ class DSLParser:
 
             if etype not in REGISTRY.etypes:
                 raise ValueError(
-                    f'unsupported type: "{etype}". '
-                    f'available: {list(REGISTRY.etypes.keys())}'
+                    f'Unsupported type: "{etype}". '
+                    f'Available: {list(REGISTRY.etypes.keys())}'
                 )
             if form not in REGISTRY.forms:
                 raise ValueError(
-                    f'unsupported form: "{form}". '
-                    f'available: {list(REGISTRY.forms.keys())}'
+                    f'Unsupported form: "{form}". '
+                    f'Available: {list(REGISTRY.forms.keys())}'
                 )
 
             self.field.etype = REGISTRY.etypes[etype]
@@ -407,8 +407,8 @@ class DSLParser:
 
             if optname not in REGISTRY.byopts:
                 raise ValueError(
-                    f'unsupported by-option: "{optname}" by. '
-                    f'available: {list(REGISTRY.byopts.keys())}'
+                    f'Unsupported by-option: "{optname}" by. '
+                    f'Available: {list(REGISTRY.byopts.keys())}'
                 )
 
             flags = self.field.flags
@@ -438,13 +438,13 @@ class DSLParser:
             self.field.flags[opt.name] = not opt.default
             return
 
-        raise ValueError(f"unknown modifier: '{mod}'")
+        raise ValueError(f"Unknown modifier: '{mod}'")
 
     @staticmethod
     def by_option_store_value_error(opt: ByOption) -> ValueError:
         raise ValueError(
-            f'unsupported by-option store: "{opt.store}". '
-            f'available: {ByOptionStore}'  # FIXME:
+            f'Unsupported by-option store: "{opt.store}". '
+            f'Available: {ByOptionStore}'  # FIXME:
         )
 
 
@@ -472,14 +472,14 @@ class Schema(object):
     ) -> Value:
         if field[1] is None and rawval is not None:
             raise ValueError(
-                f'parsing {field[0]}: no argument is allowed; "{rawval}" supplied'
+                f'Parsing {field[0]}: no argument is allowed; "{rawval}" supplied'
             )
 
         try:
             assert field[1] is not None
             return field[1].parse(rawval)
         except Exception as e:
-            raise ValueError(f'parsing {field[0]}: {e}')
+            raise ValueError(f'Parsing {field[0]}: {e}')
 
     def parse(self, data: RawData) -> ParsedData:
         if data.name:
@@ -497,7 +497,7 @@ class Schema(object):
                 if rawval := rawattrs.pop(key, None):
                     attrs[key] = self._parse_single(('attrs.' + key, field), rawval)
             for key, rawval in rawattrs.items():
-                raise ValueError(f'unknown attr: "{key}"')
+                raise ValueError(f'Unknown attr: "{key}"')
 
         if data.content:
             content = self._parse_single(('content', self.content), data.content)

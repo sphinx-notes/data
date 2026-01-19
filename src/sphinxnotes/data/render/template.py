@@ -2,17 +2,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pprint import pformat
 from typing import TYPE_CHECKING
-from enum import Enum
 
-from docutils import nodes
-from docutils.parsers.rst import directives
-from sphinx.util import logging
 from jinja2.sandbox import SandboxedEnvironment
 from jinja2 import StrictUndefined, DebugUndefined
 
-from .data import ParsedData
-from .utils import Report
-from .renderer import Renderer
+from ..data import ParsedData
+from ..utils import Report
 
 if TYPE_CHECKING:
     from typing import Any
@@ -20,45 +15,29 @@ if TYPE_CHECKING:
     from sphinx.application import Sphinx
 
 
-logger = logging.getLogger(__name__)
-
-
-class Phase(Enum):
-    Parsing = 'parsing'
-    Parsed = 'parsed'
-    PostTranform = 'post-transform'
-    # TODO: transform?
-
-    @classmethod
-    def default(cls) -> Phase:
-        return cls.Parsing
-
-    @classmethod
-    def option_spec(cls, arg):
-        choice = directives.choice(arg, [x.value for x in cls])
-        return cls[choice.title()]
-
-
 @dataclass
 class Template:
     text: str
-    phase: Phase
-    debug: bool
 
     def render(
         self,
-        renderer: Renderer,
         data: ParsedData | dict[str, Any],
         extra: dict[str, Any] = {},
-        inline: bool = False,
-    ) -> list[nodes.Node]:
-        # Main context to dic.
+        debug: Report | None = None,
+    ) -> str:
+        if debug:
+            debug.text('Starting Jinja template rendering...')
+
+            debug.text('Data:')
+            debug.code(pformat(data), lang='python')
+            debug.text('Extra context (just key):')
+            debug.code(pformat(list(extra.keys())), lang='python')
+
+        # Convert data to context dict.
         if isinstance(data, ParsedData):
             ctx = data.asdict()
         elif isinstance(data, dict):
             ctx = data.copy()
-        else:
-            assert False
 
         # Merge extra context and main context.
         conflicts = set()
@@ -68,66 +47,27 @@ class Template:
             else:
                 conflicts.add(name)
 
-        rendered_text, tmplreport = self._safe_render(ctx)
-        if tmplreport and tmplreport.is_error():
-            return [nodes.Text(rendered_text), tmplreport]
+        text = self._render(ctx, debug=debug is not None)
 
-        rendered_nodes = renderer.render(rendered_text, inline=inline)
+        return text
 
-        if tmplreport:
-            rendered_nodes.append(tmplreport)
-
-        if self.debug:
-            dbgreport = Report('Template debug report')
-
-            dbgreport.text('Data:')
-            dbgreport.code(pformat(data), lang='python')
-
-            dbgreport.text('Extra (just key):')
-            dbgreport.code(pformat(list(extra.keys())), lang='python')
-
-            dbgreport.text('Conflict keys:')
-            dbgreport.code(pformat(list(conflicts)), lang='python')
-
-            self._report_self(dbgreport)
-
-            dbgreport.text(f'Template (phase: {self.phase}, debug: {self.debug}):')
-            dbgreport.code(self.text, lang='jinja')
-
-            dbgreport.text('Rendered ndoes:')
-            dbgreport.code('\n'.join(n.pformat() for n in rendered_nodes), lang='xml')
-
-            rendered_nodes.append(dbgreport)
-
-        return rendered_nodes
-
-    def _safe_render(self, ctx: dict[str, Any]) -> tuple[str, Report | None]:
+    def _render(self, ctx: dict[str, Any], debug: bool = False) -> str:
         extensions = [
             'jinja2.ext.loopcontrols',  # enable {% break %}, {% continue %}
         ]
-        if self.debug:
+        if debug:
             extensions.append('jinja2.ext.debug')
 
         env = _JinjaEnv(
-            undefined=DebugUndefined if self.debug else StrictUndefined,
+            undefined=DebugUndefined if debug else StrictUndefined,
             extensions=extensions,
         )
         # TODO: cache jinja env
 
-        try:
-            text = env.from_string(self.text).render(ctx)
-        except Exception:
-            reporter = Report('Failed to render Jinja template:', 'ERROR')
-            reporter.text('Context:')
-            reporter.code(pformat(ctx), lang='python')
-            self._report_self(reporter)
-            reporter.excption()
-            return '', reporter
-
-        return text, None
+        return env.from_string(self.text).render(ctx)
 
     def _report_self(self, reporter: Report) -> None:
-        reporter.text(f'Template (phase: {self.phase}, debug: {self.debug}):')
+        reporter.text('Template:')
         reporter.code(self.text, lang='jinja')
 
 

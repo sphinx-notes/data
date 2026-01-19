@@ -46,13 +46,21 @@ Introduction
    :{{ k }}: {{ v }}
    {%- endfor %}
 
-   This document "_doc.title" has {{ _doc.sections | length }} section(s).
+   This document "{{ _doc.title }}" has {{ _doc.sections | length }} section(s).
 
    {{ content }} 
 
 .. data:: Shengyu Zhang
    :github: SilverRainZ
    :homepage: https://silverrainz.me/
+
+.. template::
+
+   I am an inline *{{ content }}*
+
+:data:`text`
+
+:pep:`abc`
 
 .. INTRODUCTION END
 

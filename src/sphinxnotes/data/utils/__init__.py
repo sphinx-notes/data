@@ -6,7 +6,7 @@ import traceback
 from docutils import nodes
 from docutils.frontend import get_default_settings
 from docutils.parsers.rst import Parser
-from docutils.parsers.rst.states import Struct
+from docutils.parsers.rst.states import Struct, Inliner
 from docutils.utils import new_document
 from sphinx.util import logging
 
@@ -83,6 +83,18 @@ def find_titular_node_upward(node: nodes.Element | None) -> nodes.Element | None
     return find_titular_node_upward(node.parent)
 
 
+def find_nearest_block_element(node: nodes.Node | None) -> nodes.Element | None:
+    """
+    Finds the nearest ancestor that is suitable for block-level placement.
+    Typically a Body element (paragraph, table, list) or Structural element (section).
+    """
+    while node:
+        if isinstance(node, (nodes.Body, nodes.Structural, nodes.document)):
+            return node
+        node = node.parent
+    return None
+
+
 class Report(nodes.system_message):
     type Level = Literal['DEBUG', 'INFO', 'WARNING', 'ERROR']
 
@@ -91,16 +103,14 @@ class Report(nodes.system_message):
     def __init__(
         self, title: str, level: Level = 'DEBUG', *children, **attributes
     ) -> None:
-        super().__init__(
-            title + ':', type=level, level=2, source='', *children, **attributes
-        )
+        super().__init__(title + ':', type=level, level=2, *children, **attributes)
         self.log(title)
 
     def empty(self) -> bool:
         # title is the only children
         return len(self.children) <= 1
 
-    def report(self, node: nodes.Node) -> None:
+    def node(self, node: nodes.Node) -> None:
         self += node
         self.log(f'report: {node.astext()}')
 
@@ -111,13 +121,13 @@ class Report(nodes.system_message):
             logger.warning(msg)
 
     def text(self, text: str) -> None:
-        self.report(nodes.paragraph(text, text))
+        self.node(nodes.paragraph(text, text))
 
     def code(self, code: str, lang: str | None = None) -> None:
         blk = nodes.literal_block(code, code)
         if lang:
             blk['language'] = lang
-        self.report(blk)
+        self.node(blk)
 
     def list(self, lines: Iterable[str]) -> None:
         bullet_list = nodes.bullet_list(bullet='*')
@@ -129,7 +139,7 @@ class Report(nodes.system_message):
             list_item += para
             bullet_list += list_item
 
-        self.report(bullet_list)
+        self.node(bullet_list)
 
     def excption(self) -> None:
         self.text('Exception:')
@@ -137,6 +147,14 @@ class Report(nodes.system_message):
 
     def is_error(self) -> bool:
         return self.level == 'ERROR'
+
+    def problematic(
+        self, inliner: Inliner | tuple[nodes.document, nodes.Element]
+    ) -> nodes.problematic:
+        n = problematic(self, inliner)
+        n += nodes.Text(' ')
+        n += nodes.superscript(self['type'], self['type'])
+        return n
 
 
 class Unpicklable:
@@ -148,3 +166,17 @@ class Unpicklable:
     def __reduce_ex__(self, protocol):
         # Prevent pickling explicitly
         raise pickle.PicklingError('This object is unpicklable')
+
+
+def problematic(
+    msg: nodes.system_message, inliner: Inliner | tuple[nodes.document, nodes.Element]
+) -> nodes.problematic:
+    if isinstance(inliner, Inliner):
+        return inliner.problematic('', '', msg)
+
+    # See also :meth:`docutils.parsers.rst.Inliner.problematic`.
+    msgid = inliner[0].set_id(msg, inliner[1])
+    problematic = nodes.problematic('', '', refid=msgid)
+    prbid = inliner[0].set_id(problematic)
+    msg.add_backref(prbid)
+    return problematic
