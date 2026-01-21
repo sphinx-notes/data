@@ -15,6 +15,7 @@ from ..utils import (
     find_current_document,
     find_nearest_block_element,
 )
+from ..config import Config
 
 if TYPE_CHECKING:
     from typing import Any
@@ -122,7 +123,7 @@ class pending_data(Base, Unpicklable):
         # 4. Add rendered nodes to container.
         rendered += ns
 
-        if self.template.debug:
+        if self.template.debug or Config.render_debug:
             rendered += report
 
         # Clear all empty reports before returning.

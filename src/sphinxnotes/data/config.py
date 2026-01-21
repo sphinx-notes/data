@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from typing import ClassVar
     from sphinx.application import Sphinx
     from sphinx.config import Config as SphinxConfig
 
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 class Config:
     """Global config of extension."""
 
-    render_debug: bool
+    render_debug: ClassVar[bool]
 
 
 def _config_inited(app: Sphinx, config: SphinxConfig) -> None:
