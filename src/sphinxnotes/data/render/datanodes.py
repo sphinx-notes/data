@@ -1,0 +1,168 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+from pprint import pformat
+
+from docutils import nodes
+
+from .render import Template
+from .markup import MarkupRenderer
+from .template import TemplateRenderer
+from ..data import PendingData, ParsedData
+from ..utils import (
+    Unpicklable,
+    Report,
+    Reporter,
+    find_current_document,
+    find_nearest_block_element,
+)
+
+if TYPE_CHECKING:
+    from typing import Any
+    from .markup import Host
+
+
+class Base(nodes.Element): ...
+
+
+class pending_data(Base, Unpicklable):
+    # The data to be rendered by Jinja template.
+    data: PendingData | ParsedData | dict[str, Any]
+    # The extra context for Jina template.
+    extra: dict[str, Any]
+    #: Jinja template for rendering the context.
+    template: Template
+    #: Whether rendering to inline nodes.
+    inline: bool = False
+
+    def __init__(
+        self,
+        data: PendingData | ParsedData | dict[str, Any],
+        tmpl: Template,
+        rawsource='',
+        *children,
+        **attributes,
+    ) -> None:
+        super().__init__(rawsource, *children, **attributes)
+        self.data = data
+        self.extra = {}
+        self.template = tmpl
+
+    def render(self, host: Host) -> rendered_data:
+        """The core render function."""
+        # 0. Create container for rendered nodes.
+        rendered = rendered_data()
+        # Copy attributes from pending_node.
+        rendered.update_all_atts(self)
+        # Copy source and line (which are not included in update_all_atts).
+        rendered.source, rendered.line = self.source, self.line
+        # Copy the pending's children to the rendered.
+        rendered[:0] = [x.deepcopy() for x in self.children]
+
+        report = Report(
+            'Render Debug Report', 'DEBUG', source=self.source, line=self.line
+        )
+
+        # 1. Prepare context for Jinja template.
+        if isinstance(self.data, PendingData):
+            report.text('Raw data:')
+            report.code(pformat(self.data.raw), lang='python')
+            report.text('Schema:')
+            report.code(pformat(self.data.schema), lang='python')
+
+            try:
+                data = self.data.parse()
+            except ValueError:
+                report.text('Failed to parse raw data:')
+                report.excption()
+                rendered += report
+                return rendered
+        else:
+            data = self.data
+
+        rendered.data = data
+
+        report.text('Parsed data:')
+        report.code(pformat(data), lang='python')
+        report.text('Extra context (just key):')
+        report.code(pformat(list(self.extra.keys())), lang='python')
+        report.text('Template:')
+        report.code(self.template.text, lang='jinja')
+
+        # 2. Render the template and data to markup text.
+        try:
+            markup = TemplateRenderer(self.template.text).render(data, extra=self.extra)
+        except Exception:  # TODO: what excetpion?
+            report.text('Failed to render Jinja template:')
+            report.excption()
+            rendered += report
+            return rendered
+
+        report.text('Rendered markup text:')
+        report.code(markup, lang='rst')
+
+        # 3. Render the markup text to doctree nodes.
+        try:
+            ns, msgs = MarkupRenderer(host).render(markup, inline=self.inline)
+        except Exception:
+            report.text(
+                'Failed to render markup text '
+                f'to {"inline " if self.inline else ""}nodes:'
+            )
+            report.excption()
+            rendered += report
+            return rendered
+
+        report.text('Rendered nodes:')
+        report.code('\n\n'.join([n.pformat() for n in ns]), lang='xml')
+        if msgs:
+            report.text('Systemd messages:')
+            for msg in msgs:
+                report.node(msg)
+
+        # 4. Add rendered nodes to container.
+        rendered += ns
+
+        if self.template.debug:
+            rendered += report
+
+        # Clear all empty reports before returning.
+        Reporter(rendered).clear_empty()
+
+        return rendered
+
+    def replace_self_inline(self, rendered: rendered_data) -> None:
+        # Split inline nodes and system_message noeds from rendered_data node.
+        ns, msgs = rendered.inline(parent=self.parent)
+
+        # Insert reports to nearst block elements (usually nodes.paragraph).
+        blkparent = find_nearest_block_element(self.parent) or find_current_document(
+            self
+        )
+        assert blkparent
+        blkparent += msgs
+
+        # Replace self with inline nodes.
+        self.replace_self(ns)
+
+
+class rendered_data(Base, nodes.container):
+    # The data used when rendering this node.
+    data: ParsedData | dict[str, Any] | None
+
+    def inline(
+        self, parent: nodes.Element | None = None
+    ) -> tuple[list[nodes.Node], list[nodes.system_message]]:
+        parent = parent or self.parent
+        doctree = find_current_document(parent)
+        assert parent and doctree
+
+        # Report (nodes.system_message subclass) is not inline node,
+        # should be removed before inserting to doctree.
+        reports = Reporter(self).clear()
+        for report in reports:
+            self.append(report.problematic((doctree, parent)))
+
+        children = self.children
+        self.clear()
+
+        return children, [x for x in reports]

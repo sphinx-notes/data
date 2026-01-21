@@ -56,11 +56,9 @@ Introduction
 
 .. template::
 
-   I am an inline *{{ content }}*
+   Cur builder: {{ _sphinx.builder.nam }}
 
-:data:`text`
-
-:pep:`abc`
+:data:`foo`
 
 .. INTRODUCTION END
 

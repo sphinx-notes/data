@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeVar, cast
 import pickle
 import traceback
@@ -11,7 +12,7 @@ from docutils.utils import new_document
 from sphinx.util import logging
 
 if TYPE_CHECKING:
-    from typing import Literal, Iterable
+    from typing import Literal, Iterable, Callable
     from sphinx.util.docutils import SphinxRole
 
 logger = logging.getLogger(__name__)
@@ -150,10 +151,49 @@ class Report(nodes.system_message):
     def problematic(
         self, inliner: Inliner | tuple[nodes.document, nodes.Element]
     ) -> nodes.problematic:
-        n = problematic(self, inliner)
-        n += nodes.Text(' ')
-        n += nodes.superscript(self['type'], self['type'])
-        return n
+        """Create a crossed referenced inline problematic nodes."""
+
+        if isinstance(inliner, Inliner):
+            prb = inliner.problematic('', '', self)
+        else:
+            # See also :meth:`docutils.parsers.rst.Inliner.problematic`.
+            msgid = inliner[0].set_id(self, inliner[1])
+            prb = nodes.problematic('', '', refid=msgid)
+            prbid = inliner[0].set_id(prb)
+            self.add_backref(prbid)
+            return prb
+
+        prb += nodes.Text(' ')
+        prb += nodes.superscript(self['type'], self['type'])
+
+        return prb
+
+
+@dataclass
+class Reporter:
+    """A helper class for storing :cls:`Report` to nodes."""
+
+    node: nodes.Element
+
+    @property
+    def reports(self) -> list[Report]:
+        """Use ``node += Report('xxx')`` to append a report."""
+        return [x for x in self.node if isinstance(x, Report)]
+
+    def append(self, report: Report) -> None:
+        self.node += report
+
+    def clear(self, pred: Callable[[Report], bool] | None = None) -> list[Report]:
+        """Clear report children from node if pred returns True."""
+        msgs = []
+        for report in self.reports:
+            if not pred or pred(report):
+                msgs.append(report)
+                self.node.remove(report)
+        return msgs
+
+    def clear_empty(self) -> list[Report]:
+        return self.clear(lambda x: x.empty())
 
 
 class Unpicklable:
@@ -165,17 +205,3 @@ class Unpicklable:
     def __reduce_ex__(self, protocol):
         # Prevent pickling explicitly
         raise pickle.PicklingError('This object is unpicklable')
-
-
-def problematic(
-    msg: nodes.system_message, inliner: Inliner | tuple[nodes.document, nodes.Element]
-) -> nodes.problematic:
-    if isinstance(inliner, Inliner):
-        return inliner.problematic('', '', msg)
-
-    # See also :meth:`docutils.parsers.rst.Inliner.problematic`.
-    msgid = inliner[0].set_id(msg, inliner[1])
-    problematic = nodes.problematic('', '', refid=msgid)
-    prbid = inliner[0].set_id(problematic)
-    msg.add_backref(prbid)
-    return problematic

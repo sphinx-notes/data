@@ -24,15 +24,17 @@ from .data import (
     Schema,
 )
 from .render import (
+    Phase,
+    Template,
+    Host,
     pending_data,
     rendered_data,
     BaseDataDefineRole,
     BaseDataDefineDirective,
     StrictDataDefineDirective,
+    ExtraContextRegistry,
+    ExtraContextGenerator,
 )
-from .render.template import Template
-from .render.renderer import Host
-from .render.extractx import ExtraContextRegistry, ExtraContextGenerator
 from .config import Config
 
 if TYPE_CHECKING:
@@ -83,10 +85,8 @@ def setup(app: Sphinx):
     meta.pre_setup(app)
 
     from . import config, render, adhoc
-    from .render import template
 
     config.setup(app)
-    template.setup(app)
     render.setup(app)
     adhoc.setup(app)
 

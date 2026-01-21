@@ -4,19 +4,15 @@ from abc import ABC, abstractmethod
 
 from sphinx.util.docutils import SphinxDirective
 
-from ..utils import find_current_section
+from .render import HostWrapper
+from .datanodes import pending_data
+from ..utils import find_current_section, Report, Reporter
 from ..utils.ctxproxy import proxy
 
 if TYPE_CHECKING:
     from typing import Any, Callable, ClassVar
     from sphinx.application import Sphinx
-    from .renderer import ParseHost
-
-
-from ..utils import Report
-from .nodes import pending_data
-from .renderer import TransformHost, HostWrapper
-from .reporter import Reporter
+    from .render import ParseHost, TransformHost
 
 
 class GlobalExtraContxt(ABC):

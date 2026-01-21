@@ -9,7 +9,7 @@ Preset templates and schemas.
 """
 
 from .data import Schema, Field
-from .render.template import Template
+from .render import Template
 
 
 class Directive:

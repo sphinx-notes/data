@@ -18,44 +18,14 @@ from docutils.utils import new_document
 from sphinx.util.docutils import SphinxDirective, SphinxRole
 from sphinx.transforms import SphinxTransform
 
+from .render import Host
+
 if TYPE_CHECKING:
     from docutils.nodes import Node, system_message
 
-# Possible render host of :meth:`pending_node.render`.
-type Host = ParseHost | TransformHost
-# Host of source parse phase (Phase.Parsing, Phase.Parsed).
-type ParseHost = SphinxDirective | SphinxRole
-# Host of source parse phase (Phase.Parsing, Phase.Parsed).
-type TransformHost = SphinxTransform
-
 
 @dataclass
-class HostWrapper:
-    v: Host
-
-    @property
-    def doctree(self) -> nodes.document:
-        if isinstance(self.v, SphinxDirective):
-            return self.v.state.document
-        elif isinstance(self.v, SphinxRole):
-            return self.v.inliner.document
-        elif isinstance(self.v, SphinxTransform):
-            return self.v.document
-        else:
-            raise NotImplementedError
-
-    @property
-    def parent(self) -> nodes.Element | None:
-        if isinstance(self.v, SphinxDirective):
-            return self.v.state.parent
-        elif isinstance(self.v, SphinxRole):
-            return self.v.inliner.parent
-        else:
-            return None
-
-
-@dataclass
-class Renderer:
+class MarkupRenderer:
     host: Host
 
     def render(

@@ -22,9 +22,7 @@ from docutils.parsers.rst import directives
 from sphinx.util.docutils import SphinxDirective
 
 from .data import Field, Schema
-from .render.template import Template
-from .render.nodes import Phase
-from .render import BaseDataDefineDirective, BaseDataDefineRole
+from .render import Phase, Template, BaseDataDefineDirective, BaseDataDefineRole
 from .utils.freestyle import FreeStyleDirective, FreeStyleOptionSpec
 from . import preset
 

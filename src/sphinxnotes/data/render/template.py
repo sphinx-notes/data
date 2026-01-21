@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from pprint import pformat
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from jinja2.sandbox import SandboxedEnvironment
 from jinja2 import StrictUndefined, DebugUndefined
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class Template:
+class TemplateRenderer:
     text: str
 
     def render(
@@ -77,22 +77,22 @@ class _JinjaEnv(SandboxedEnvironment):
     _filter_factories = {}
 
     @classmethod
-    def setup(cls, app: Sphinx):
-        """You must call this method before instantiating"""
-        app.connect('builder-inited', cls._on_builder_inited)
-        app.connect('build-finished', cls._on_build_finished)
-
-    @classmethod
     def _on_builder_inited(cls, app: Sphinx):
         cls._builder = app.builder
+
+    @classmethod
+    def _on_build_finished(cls, app: Sphinx, exception): ...
 
     @classmethod
     def add_filter(cls, name: str, ff):
         cls._filter_factories[name] = ff
 
-    @classmethod
-    def _on_build_finished(cls, app: Sphinx, exception): ...
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name, factory in self._filter_factories.items():
+            self.filters[name] = factory(self._builder.env)
 
+    @override
     def is_safe_attribute(self, obj, attr, value=None):
         """
         The sandboxed environment will call this method to check if the
@@ -100,16 +100,14 @@ class _JinjaEnv(SandboxedEnvironment):
         starting with an underscore are considered private as well as the
         special attributes of internal python objects as returned by the
         is_internal_attribute() function.
+
+        .. seealso:: :cls:`..utils.ctxproxy.Proxy`
         """
         if attr.startswith('_'):
             return False
         return super().is_safe_attribute(obj, attr, value)
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        for name, factory in self._filter_factories.items():
-            self.filters[name] = factory(self._builder.env)
-
 
 def setup(app: Sphinx):
-    _JinjaEnv.setup(app)
+    app.connect('builder-inited', _JinjaEnv._on_builder_inited)
+    app.connect('build-finished', _JinjaEnv._on_build_finished)
