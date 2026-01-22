@@ -37,9 +37,7 @@ The Pipline
 How :cls:`RawData` be rendered ``list[nodes.Node]``
 ===================================================
 
-1. Schema.parse(RawData) -> ParsedData
-2. TemplateRenderer.render(ParsedData) -> Markup Text (``str``)
-3. MarkupRenderer.render(Markup Text) -> doctree Nodes (list[nodes.Node])
+.. seealso:: :meth:`.datanodes.pending_data.render`.
 
 """
 
@@ -53,7 +51,7 @@ from sphinx.util import logging
 from sphinx.util.docutils import SphinxDirective, SphinxRole
 from sphinx.transforms.post_transforms import SphinxPostTransform, ReferencesResolver
 
-from .render import Phase, Template, Host, ParseHost
+from .render import Phase, Template, Host, ParseHost, TransformHost
 from .datanodes import pending_data, rendered_data
 from .extractx import ExtraContextGenerator
 from ..data import RawData, PendingData, ParsedData, Field, Schema
@@ -65,7 +63,91 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class BaseDataDefiner(ABC):
+class Pipeline(ABC):
+    #: Queue of pending node to be rendered.
+    _q: list[pending_data] | None = None
+
+    """Methods to be overrided."""
+
+    def process_pending_node(self, n: pending_data) -> bool:
+        """
+        You can add hooks to pending node here.
+
+        Return ``true`` if you want to render the pending node *immediately*,
+        otherwise it will be inserted to doctree directly andwaiting to later
+        rendering
+        """
+        ...
+
+    def process_rendered_node(self, n: rendered_data) -> None: ...
+
+    """Helper method for subclasses."""
+
+    @final
+    def queue(self, n: pending_data) -> None:
+        if not self._q:
+            self._q = []
+        self._q.append(n)
+
+    @final
+    def queue_raw_data(
+        self, data: RawData, schema: Schema, tmpl: Template
+    ) -> pending_data:
+        pending = pending_data(PendingData(data, schema), tmpl)
+        self.queue(pending)
+        return pending
+
+    @final
+    def queue_parsed_data(self, data: ParsedData, tmpl: Template) -> pending_data:
+        pending = pending_data(data, tmpl)
+        self.queue(pending)
+        return pending
+
+    @final
+    def queue_any_data(self, data: Any, tmpl: Template) -> pending_data:
+        pending = pending_data(data, tmpl)
+        self.queue(pending)
+        return pending
+
+    @final
+    def render_queue(self) -> list[pending_data | rendered_data]:
+        """
+        Try rendering all pending nodes in queue.
+
+        If the timing(Phase) is ok, :cls:`pending_data` will be rendered to a
+        :cls:`rendered_data`; otherwise, the pending node is unchanged.
+
+        If the pending node is already inserted to document, it will not be return.
+        And the corrsponding rendered node will replace it too.
+        """
+
+        ns = []
+        while self._q:
+            pending = self._q.pop()
+
+            if not self.process_pending_node(pending):
+                ns.append(pending)
+                continue
+
+            # Generate global extra context for later use.
+            ExtraContextGenerator(pending).on_anytime()
+
+            rendered = pending.render(cast(Host, self))
+            self.process_rendered_node(rendered)
+
+            if not pending.parent:
+                ns.append(rendered)
+                continue
+
+            if pending.inline:
+                pending.replace_self_inline(rendered)
+            else:
+                pending.replace_self(rendered)
+
+        return ns
+
+
+class BaseDataDefiner(Pipeline):
     """
     A abstract class that owns :cls:`RawData` and support
     validating and rendering the data at the appropriate time.
@@ -77,147 +159,92 @@ class BaseDataDefiner(ABC):
     """Methods to be implemented."""
 
     @abstractmethod
-    def current_raw_data(self) -> RawData: ...
-
-    @abstractmethod
     def current_template(self) -> Template: ...
 
     @abstractmethod
     def current_schema(self) -> Schema: ...
 
-    """Methods to be overrided."""
+    """Methods override from parent."""
 
-    def process_raw_data(self, data: RawData) -> None: ...
+    @override
+    def process_pending_node(self, n: pending_data) -> bool:
+        host = cast(ParseHost, self)
 
-    def process_paresd_data(self, data: ParsedData) -> None: ...
-
-    def process_pending_node(self, n: pending_data) -> None: ...
-
-    def process_rendered_node(self, n: rendered_data) -> None: ...
-
-    """Methods used internal."""
-
-    @final
-    def build_pending_node(
-        self,
-        data: PendingData | ParsedData | dict[str, Any],
-        tmpl: Template,
-    ) -> pending_data:
-        if isinstance(data, PendingData):
-            self.process_raw_data(data.raw)
-
-        pending = pending_data(data, tmpl)
-
+        # Set source and line.
+        host.set_source_info(n)
         # Generate and save parsing phase extra context for later use.
-        ExtraContextGenerator(pending).on_parsing(cast(ParseHost, self))
+        ExtraContextGenerator(n).on_parsing(host)
 
-        self.process_pending_node(pending)
-
-        return pending
-
-    @final
-    def render_pending_node(self, pending: pending_data) -> rendered_data:
-        # Generate and save parsing phase extra context for later use.
-        ExtraContextGenerator(pending).on_anytime()
-
-        rendered = pending.render(cast(Host, self))
-
-        if isinstance(rendered.data, ParsedData):
-            # FIXME: template are rendered, meanless to procss parsed data.
-            self.process_paresd_data(rendered.data)
-
-        self.process_rendered_node(rendered)
-
-        return rendered
-
-    @final
-    def render_or_pass(self) -> pending_data | rendered_data:
-        """
-        If the timing(Phase) is ok, rendering the data to a :cls:`rendered_data`;
-        otherwise, returns a :cls:`pending_data node`.
-        """
-        data = self.current_raw_data()
-        schema = self.current_schema()
-        tmpl = self.current_template()
-
-        pending = self.build_pending_node(PendingData(data, schema), tmpl)
-
-        if pending.template.phase != Phase.Parsing:
-            return pending
-
-        return self.render_pending_node(pending)
+        return n.template.phase == Phase.Parsing
 
 
 class BaseDataDefineDirective(BaseDataDefiner, SphinxDirective):
     @override
-    def current_raw_data(self) -> RawData:
-        return RawData(
+    def run(self) -> list[nodes.Node]:
+        data = RawData(
             ' '.join(self.arguments) if self.arguments else None,
             self.options.copy(),
             '\n'.join(self.content) if self.has_content else None,
         )
+        schema = self.current_schema()
+        tmpl = self.current_template()
+        self.queue_raw_data(data, schema, tmpl)
 
-    @override
-    def process_pending_node(self, n: pending_data) -> None:
-        self.set_source_info(n)
-
-    @override
-    def run(self) -> list[nodes.Node]:
-        return [self.render_or_pass()]
+        return [x for x in self.render_queue()]
 
 
 class BaseDataDefineRole(BaseDataDefiner, SphinxRole):
     @override
-    def current_raw_data(self) -> RawData:
-        return RawData(None, {}, self.text)
-
-    @override
-    def process_pending_node(self, n: pending_data) -> None:
-        self.set_source_info(n)
+    def process_pending_node(self, n: pending_data) -> bool:
         n.inline = True
+        return super().process_pending_node(n)
 
     @override
     def run(self) -> tuple[list[nodes.Node], list[nodes.system_message]]:
-        n = self.render_or_pass()
-        if isinstance(n, pending_data):
-            return [n], []
-        return n.inline(parent=self.inliner.parent)
+        data = RawData(None, {}, self.text)
+        schema = self.current_schema()
+        tmpl = self.current_template()
+        self.queue_raw_data(data, schema, tmpl)
+
+        ns, msgs = [], []
+        for n in self.render_queue():
+            if not isinstance(n, rendered_data):
+                ns.append(n)
+                continue
+            n, msg = n.inline(parent=self.inliner.parent)
+            ns += n
+            msgs += msg
+
+        return ns, msgs
 
 
-class _ParsedHook(SphinxDirective):
+class _ParsedHook(SphinxDirective, Pipeline):
+    @override
+    def process_pending_node(self, n: pending_data) -> bool:
+        self.state.document.note_source(n.source, n.line)  # type: ignore[arg-type]
+
+        # Generate and save parsed extra context for later use.
+        ExtraContextGenerator(n).on_parsed(cast(ParseHost, self))
+
+        return n.template.phase == Phase.Parsed
+
+    @override
     def run(self) -> list[nodes.Node]:
         logger.warning(f'running parsed hook for doc {self.env.docname}...')
 
-        # Save origin system_message method.
-        orig_sysmsg = self.state_machine.reporter.system_message
-
         for pending in self.state.document.findall(pending_data):
-            # Generate and save parsed extra context for later use.
-            ExtraContextGenerator(pending).on_parsed(cast(ParseHost, self))
-
-            if pending.template.phase != Phase.Parsed:
-                continue
-
+            self.queue(pending)
             # Hook system_message method to let it report the
             # correct line number.
-            def fix_lineno(level, message, *children, **kwargs):
-                kwargs['line'] = pending.line
-                return orig_sysmsg(level, message, *children, **kwargs)
+            # TODO: self.state.document.note_source(source, line)  # type: ignore[arg-type]
+            # def fix_lineno(level, message, *children, **kwargs):
+            #     kwargs['line'] = pending.line
+            #     return orig_sysmsg(level, message, *children, **kwargs)
 
-            self.state_machine.reporter.system_message = fix_lineno
+            # self.state_machine.reporter.system_message = fix_lineno
 
-            # Generate and save render phase extra contexts for later use.
-            ExtraContextGenerator(pending).on_anytime()
-
-            rendered = pending.render(self)
-
-            if pending.inline:
-                pending.replace_self_inline(rendered)
-            else:
-                pending.replace_self(rendered)
-
-        # Restore system_message method.
-        self.state_machine.reporter.system_message = orig_sysmsg
+        ns = self.render_queue()
+        assert len(ns) == 0
 
         return []  # nothing to return
 
@@ -287,29 +314,26 @@ def _insert_parsed_hook(app, docname, content):
     content[-1] = content[-1] + '\n\n.. data.parsed-hook::'
 
 
-class _ResolvingHook(SphinxPostTransform):
+class _ResolvingHook(SphinxPostTransform, Pipeline):
     # After resolving pending_xref.
     default_priority = (ReferencesResolver.default_priority or 10) + 5
 
+    @override
+    def process_pending_node(self, n: pending_data) -> bool:
+        # Generate and save post transform extra context for later use.
+        ExtraContextGenerator(n).on_post_transform(cast(TransformHost, self))
+
+        return n.template.phase == Phase.PostTranform
+
+    @override
     def apply(self, **kwargs):
         logger.warning(f'running resolving hook for doc {self.env.docname}...')
 
         for pending in self.document.findall(pending_data):
-            # Generate and save parsed extra context for later use.
-            ExtraContextGenerator(pending).on_post_transform(self)
+            self.queue(pending)
 
-            if pending.template.phase != Phase.PostTranform:
-                continue
-
-            # Generate and save render phase extra contexts for later use.
-            ExtraContextGenerator(pending).on_anytime()
-
-            rendered = pending.render(self)
-
-            if pending.inline:
-                pending.replace_self_inline(rendered)
-            else:
-                pending.replace_self(rendered)
+        ns = self.render_queue()
+        assert len(ns) == 0
 
 
 def setup(app: Sphinx) -> None:

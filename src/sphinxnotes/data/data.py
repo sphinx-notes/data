@@ -253,7 +253,7 @@ class ParsedData:
 
 
 @dataclass
-class Field:
+class Field(Unpicklable):
     #: Type of element.
     etype: type = str
     #: Type of container (if the field holds multiple values).

@@ -47,7 +47,11 @@ class TemplateDefineDirective(SphinxDirective):
     has_content = True
 
     def run(self) -> list[nodes.Node]:
-        self.env.temp_data[TEMPLATE_KEY] = Template('\n'.join(self.content))
+        self.env.temp_data[TEMPLATE_KEY] = Template(
+            '\n'.join(self.content),
+            phase=self.options.get('on', Phase.default()),
+            debug='debug' in self.options,
+        )
 
         return []
 

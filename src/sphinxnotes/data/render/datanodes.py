@@ -7,7 +7,7 @@ from docutils import nodes
 from .render import Template
 from .markup import MarkupRenderer
 from .template import TemplateRenderer
-from ..data import PendingData, ParsedData
+from ..data import RawData, PendingData, ParsedData
 from ..utils import (
     Unpicklable,
     Report,
@@ -18,7 +18,7 @@ from ..utils import (
 from ..config import Config
 
 if TYPE_CHECKING:
-    from typing import Any
+    from typing import Any, Callable
     from .markup import Host
 
 
@@ -33,12 +33,13 @@ class pending_data(Base, Unpicklable):
     #: Jinja template for rendering the context.
     template: Template
     #: Whether rendering to inline nodes.
-    inline: bool = False
+    inline: bool
 
     def __init__(
         self,
         data: PendingData | ParsedData | dict[str, Any],
         tmpl: Template,
+        inline: bool = False,
         rawsource='',
         *children,
         **attributes,
@@ -47,9 +48,22 @@ class pending_data(Base, Unpicklable):
         self.data = data
         self.extra = {}
         self.template = tmpl
+        self.inline = inline
+
+        # Init hook lists.
+        self._raw_data_hooks = []
+        self._parsed_data_hooks = []
+        self._markup_text_hooks = []
+        self._rendered_nodes_hooks = []
 
     def render(self, host: Host) -> rendered_data:
-        """The core render function."""
+        """
+        The core function for rendering data to docutils nodes.
+
+        1. Schema.parse(RawData) -> ParsedData
+        2. TemplateRenderer.render(ParsedData) -> Markup Text (``str``)
+        3. MarkupRenderer.render(Markup Text) -> doctree Nodes (list[nodes.Node])
+        """
         # 0. Create container for rendered nodes.
         rendered = rendered_data()
         # Copy attributes from pending_node.
@@ -144,6 +158,32 @@ class pending_data(Base, Unpicklable):
 
         # Replace self with inline nodes.
         self.replace_self(ns)
+
+    """Hooks for procssing render intermediate products. """
+
+    type RawDataHook = Callable[[pending_data, RawData], None]
+    type ParsedDataHook = Callable[[pending_data, RawData], None]
+    type MarkupTextHook = Callable[[pending_data, str], None]
+    type RenderedNodesHook = Callable[
+        [pending_data, list[nodes.Node], list[nodes.system_message]], None
+    ]
+
+    _raw_data_hooks: list[RawDataHook]
+    _parsed_data_hooks: list[ParsedDataHook]
+    _markup_text_hooks: list[MarkupTextHook]
+    _rendered_nodes_hooks: list[RenderedNodesHook]
+
+    def process_raw_data(self, hook: RawDataHook) -> None:
+        self._raw_data_hooks.append(hook)
+
+    def process_parsed_data(self, hook: ParsedDataHook) -> None:
+        self._parsed_data_hooks.append(hook)
+
+    def process_markup_text(self, hook: MarkupTextHook) -> None:
+        self._markup_text_hooks.append(hook)
+
+    def process_rendered_nodes(self, hook: RenderedNodesHook) -> None:
+        self._rendered_nodes_hooks.append(hook)
 
 
 class rendered_data(Base, nodes.container):

@@ -204,4 +204,4 @@ class Unpicklable:
 
     def __reduce_ex__(self, protocol):
         # Prevent pickling explicitly
-        raise pickle.PicklingError('This object is unpicklable')
+        raise pickle.PicklingError(f'{type(self)} is unpicklable')
