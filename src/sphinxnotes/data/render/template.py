@@ -10,9 +10,10 @@ from ..data import ParsedData
 from ..utils import Report
 
 if TYPE_CHECKING:
-    from typing import Any
-    from sphinx.builders import Builder
+    from typing import Any, Iterable
     from sphinx.application import Sphinx
+    from sphinx.environment import BuildEnvironment
+    from sphinx.builders import Builder
 
 
 @dataclass
@@ -108,6 +109,27 @@ class _JinjaEnv(SandboxedEnvironment):
         return super().is_safe_attribute(obj, attr, value)
 
 
+def _roles_filter(env: BuildEnvironment):
+    """
+    Fetch artwork picture by ID and install theme to Sphinx's source directory,
+    return the relative URI of current doc root.
+    """
+    def _filter(value: Iterable[str], role: str) -> Iterable[str]:
+        """
+        A heplfer filter for converting list of string to list of role.
+
+        For example::
+
+            {{ ["foo", "bar"] | roles("doc") }}
+
+        Produces ``[":doc:`foo`", ":doc:`bar`"]``.
+        """
+        return map(lambda x: ':%s:`%s`' % (role, x), value)
+    return _filter
+
+
 def setup(app: Sphinx):
     app.connect('builder-inited', _JinjaEnv._on_builder_inited)
     app.connect('build-finished', _JinjaEnv._on_build_finished)
+
+    _JinjaEnv.add_filter('roles', _roles_filter)
