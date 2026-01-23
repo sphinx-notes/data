@@ -55,7 +55,7 @@ class pending_node(Base, Unpicklable):
         self._raw_data_hooks = []
         self._parsed_data_hooks = []
         self._markup_text_hooks = []
-        self._rendered_nodes_hooks = []
+        self._rendered_node_hooks = []
 
     def render(self, host: Host) -> rendered_node:
         """
@@ -85,6 +85,9 @@ class pending_node(Base, Unpicklable):
             report.text('Schema:')
             report.code(pformat(self.data.schema), lang='python')
 
+            for hook in self._raw_data_hooks:
+                hook(self, self.data.raw)
+
             try:
                 data = self.data.parse()
             except ValueError:
@@ -94,6 +97,9 @@ class pending_node(Base, Unpicklable):
                 return rendered
         else:
             data = self.data
+
+        for hook in self._parsed_data_hooks:
+            hook(self, data)
 
         rendered.data = data
 
@@ -112,6 +118,9 @@ class pending_node(Base, Unpicklable):
             report.excption()
             rendered += report
             return rendered
+
+        for hook in self._markup_text_hooks:
+            markup = hook(self, markup)
 
         report.text('Rendered markup text:')
         report.code(markup, lang='rst')
@@ -132,8 +141,7 @@ class pending_node(Base, Unpicklable):
         report.code('\n\n'.join([n.pformat() for n in ns]), lang='xml')
         if msgs:
             report.text('Systemd messages:')
-            for msg in msgs:
-                report.node(msg)
+            [report.node(msg) for msg in msgs]
 
         # 4. Add rendered nodes to container.
         rendered += ns
@@ -143,6 +151,9 @@ class pending_node(Base, Unpicklable):
 
         # Clear all empty reports before returning.
         Reporter(rendered).clear_empty()
+
+        for hook in self._rendered_node_hooks:
+            hook(self, rendered)
 
         return rendered
 
@@ -165,28 +176,26 @@ class pending_node(Base, Unpicklable):
     """Hooks for procssing render intermediate products. """
 
     type RawDataHook = Callable[[pending_node, RawData], None]
-    type ParsedDataHook = Callable[[pending_node, RawData], None]
-    type MarkupTextHook = Callable[[pending_node, str], None]
-    type RenderedNodesHook = Callable[
-        [pending_node, list[nodes.Node], list[nodes.system_message]], None
-    ]
+    type ParsedDataHook = Callable[[pending_node, ParsedData | dict[str, Any]], None]
+    type MarkupTextHook = Callable[[pending_node, str], str]
+    type RenderedNodeHook = Callable[[pending_node, rendered_node], None]
 
     _raw_data_hooks: list[RawDataHook]
     _parsed_data_hooks: list[ParsedDataHook]
     _markup_text_hooks: list[MarkupTextHook]
-    _rendered_nodes_hooks: list[RenderedNodesHook]
+    _rendered_node_hooks: list[RenderedNodeHook]
 
-    def process_raw_data(self, hook: RawDataHook) -> None:
+    def hook_raw_data(self, hook: RawDataHook) -> None:
         self._raw_data_hooks.append(hook)
 
-    def process_parsed_data(self, hook: ParsedDataHook) -> None:
+    def hook_parsed_data(self, hook: ParsedDataHook) -> None:
         self._parsed_data_hooks.append(hook)
 
-    def process_markup_text(self, hook: MarkupTextHook) -> None:
+    def hook_markup_text(self, hook: MarkupTextHook) -> None:
         self._markup_text_hooks.append(hook)
 
-    def process_rendered_nodes(self, hook: RenderedNodesHook) -> None:
-        self._rendered_nodes_hooks.append(hook)
+    def hook_rendered_node(self, hook: RenderedNodeHook) -> None:
+        self._rendered_node_hooks.append(hook)
 
 
 class rendered_node(Base, nodes.container):

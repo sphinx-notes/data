@@ -78,12 +78,10 @@ class Pipeline(ABC):
         """
         ...
 
-    def process_rendered_node(self, n: rendered_node) -> None: ...
-
     """Helper method for subclasses."""
 
     @final
-    def queue(self, n: pending_node) -> None:
+    def queue_pending_node(self, n: pending_node) -> None:
         if not self._q:
             self._q = []
         self._q.append(n)
@@ -93,19 +91,19 @@ class Pipeline(ABC):
         self, data: RawData, schema: Schema, tmpl: Template
     ) -> pending_node:
         pending = pending_node(PendingData(data, schema), tmpl)
-        self.queue(pending)
+        self.queue_pending_node(pending)
         return pending
 
     @final
     def queue_parsed_data(self, data: ParsedData, tmpl: Template) -> pending_node:
         pending = pending_node(data, tmpl)
-        self.queue(pending)
+        self.queue_pending_node(pending)
         return pending
 
     @final
     def queue_any_data(self, data: Any, tmpl: Template) -> pending_node:
         pending = pending_node(data, tmpl)
-        self.queue(pending)
+        self.queue_pending_node(pending)
         return pending
 
     @final
@@ -133,7 +131,6 @@ class Pipeline(ABC):
 
             host = cast(Host, self)
             rendered = pending.render(host)
-            self.process_rendered_node(rendered)
 
             if pending.parent is None:
                 ns.append(rendered)
@@ -244,7 +241,7 @@ class _ParsedHook(SphinxDirective, Pipeline):
         logger.warning(f'running parsed hook for doc {self.env.docname}...')
 
         for pending in self.state.document.findall(pending_node):
-            self.queue(pending)
+            self.queue_pending_node(pending)
             # Hook system_message method to let it report the
             # correct line number.
             # TODO: self.state.document.note_source(source, line)  # type: ignore[arg-type]
@@ -287,7 +284,7 @@ class _ResolvingHook(SphinxPostTransform, Pipeline):
         logger.warning(f'running resolving hook for doc {self.env.docname}...')
 
         for pending in self.document.findall(pending_node):
-            self.queue(pending)
+            self.queue_pending_node(pending)
 
         ns = self.render_queue()
         assert len(ns) == 0
