@@ -73,6 +73,8 @@ class pending_node(Base, Unpicklable):
         rendered.source, rendered.line = self.source, self.line
         # Copy the pending's children to the rendered.
         rendered[:0] = [x.deepcopy() for x in self.children]
+        # Clear all empty reports.
+        Reporter(rendered).clear_empty()
 
         report = Report(
             'Render Debug Report', 'DEBUG', source=self.source, line=self.line
@@ -148,9 +150,6 @@ class pending_node(Base, Unpicklable):
 
         if self.template.debug or Config.render_debug:
             rendered += report
-
-        # Clear all empty reports before returning.
-        Reporter(rendered).clear_empty()
 
         for hook in self._rendered_node_hooks:
             hook(self, rendered)
