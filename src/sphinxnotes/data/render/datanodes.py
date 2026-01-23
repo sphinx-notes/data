@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 from pprint import pformat
 
 from docutils import nodes
+from docutils.parsers.rst.states import Inliner
 
 from .render import Template
 from .markup import MarkupRenderer
@@ -127,7 +128,7 @@ class pending_node(Base, Unpicklable):
             rendered += report
             return rendered
 
-        report.text('Rendered nodes:')
+        report.text(f'Rendered nodes (inline: {self.inline}):')
         report.code('\n\n'.join([n.pformat() for n in ns]), lang='xml')
         if msgs:
             report.text('Systemd messages:')
@@ -145,9 +146,11 @@ class pending_node(Base, Unpicklable):
 
         return rendered
 
-    def replace_self_inline(self, rendered: rendered_node) -> None:
+    def replace_self_inline(
+        self, rendered: rendered_node, inliner: Report.Inliner
+    ) -> None:
         # Split inline nodes and system_message noeds from rendered_node node.
-        ns, msgs = rendered.inline(parent=self.parent)
+        ns, msgs = rendered.inline(inliner)
 
         # Insert reports to nearst block elements (usually nodes.paragraph).
         blkparent = find_nearest_block_element(self.parent) or find_current_document(
@@ -191,17 +194,14 @@ class rendered_node(Base, nodes.container):
     data: ParsedData | dict[str, Any] | None
 
     def inline(
-        self, parent: nodes.Element | None = None
+        self,
+        inliner: Inliner | tuple[nodes.document, nodes.Element],
     ) -> tuple[list[nodes.Node], list[nodes.system_message]]:
-        parent = parent or self.parent
-        doctree = find_current_document(parent)
-        assert parent and doctree
-
         # Report (nodes.system_message subclass) is not inline node,
         # should be removed before inserting to doctree.
         reports = Reporter(self).clear()
         for report in reports:
-            self.append(report.problematic((doctree, parent)))
+            self.append(report.problematic(inliner))
 
         children = self.children
         self.clear()

@@ -50,7 +50,7 @@ from sphinx.util import logging
 from sphinx.util.docutils import SphinxDirective, SphinxRole
 from sphinx.transforms.post_transforms import SphinxPostTransform, ReferencesResolver
 
-from .render import Phase, Template, Host, ParseHost, TransformHost
+from .render import HostWrapper, Phase, Template, Host, ParseHost, TransformHost
 from .datanodes import pending_node, rendered_node
 from .extractx import ExtraContextGenerator
 from ..data import RawData, PendingData, ParsedData, Schema
@@ -131,15 +131,18 @@ class Pipeline(ABC):
             # Generate global extra context for later use.
             ExtraContextGenerator(pending).on_anytime()
 
-            rendered = pending.render(cast(Host, self))
+            host = cast(Host, self)
+            rendered = pending.render(host)
             self.process_rendered_node(rendered)
 
-            if not pending.parent:
+            if pending.parent is None:
                 ns.append(rendered)
                 continue
 
             if pending.inline:
-                pending.replace_self_inline(rendered)
+                pending.replace_self_inline(
+                    rendered, (HostWrapper(host).doctree, pending.parent)
+                )
             else:
                 pending.replace_self(rendered)
 
@@ -219,7 +222,7 @@ class BaseDataDefineRole(BaseDataDefiner, SphinxRole):
             if not isinstance(n, rendered_node):
                 ns.append(n)
                 continue
-            n, msg = n.inline(parent=self.inliner.parent)
+            n, msg = n.inline(self.inliner)
             ns += n
             msgs += msg
 

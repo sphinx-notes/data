@@ -7,7 +7,7 @@ import traceback
 from docutils import nodes
 from docutils.frontend import get_default_settings
 from docutils.parsers.rst import Parser
-from docutils.parsers.rst.states import Struct, Inliner
+from docutils.parsers.rst.states import Struct, Inliner as RstInliner
 from docutils.utils import new_document
 from sphinx.util import logging
 
@@ -150,12 +150,12 @@ class Report(nodes.system_message):
     def is_error(self) -> bool:
         return self.level == 'ERROR'
 
-    def problematic(
-        self, inliner: Inliner | tuple[nodes.document, nodes.Element]
-    ) -> nodes.problematic:
+    type Inliner = RstInliner | tuple[nodes.document, nodes.Element]
+
+    def problematic(self, inliner: Inliner) -> nodes.problematic:
         """Create a crossed referenced inline problematic nodes."""
 
-        if isinstance(inliner, Inliner):
+        if isinstance(inliner, RstInliner):
             prb = inliner.problematic('', '', self)
         else:
             # See also :meth:`docutils.parsers.rst.Inliner.problematic`.
