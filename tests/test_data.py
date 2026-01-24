@@ -59,7 +59,7 @@ class TestFieldParser(unittest.TestCase):
         self.assertTrue(f.required)
         f = Field.from_dsl('int, required')
         self.assertTrue(f.required)
-        with self.assertRaisesRegex(ValueError, 'argument required'):
+        with self.assertRaisesRegex(ValueError, 'Argument required'):
             f.parse(None)
 
     # ==========================
@@ -115,10 +115,10 @@ class TestFieldParser(unittest.TestCase):
     # ==========================
 
     def test_unsupported_modifier(self):
-        with self.assertRaisesRegex(ValueError, 'unsupported type'):
+        with self.assertRaisesRegex(ValueError, 'Unsupported type'):
             Field.from_dsl('list of unknown')
 
-        with self.assertRaisesRegex(ValueError, 'unknown modifier'):
+        with self.assertRaisesRegex(ValueError, 'Unknown modifier'):
             Field.from_dsl('int, random_mod')
 
 
