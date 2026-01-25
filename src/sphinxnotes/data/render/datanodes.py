@@ -163,10 +163,8 @@ class pending_node(Base, Unpicklable):
         ns, msgs = rendered.inline(inliner)
 
         # Insert reports to nearst block elements (usually nodes.paragraph).
-        blkparent = find_nearest_block_element(self.parent) or find_current_document(
-            self
-        )
-        assert blkparent
+        doctree = inliner.document if isinstance(inliner, Inliner) else inliner[1]
+        blkparent = find_nearest_block_element(self.parent) or doctree
         blkparent += msgs
 
         # Replace self with inline nodes.
