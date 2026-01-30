@@ -260,6 +260,8 @@ class Field(Unpicklable):
     ctype: type | None = None
     #: Flags of field.
     flags: dict[str, Value] = dataclass_field(default_factory=dict)
+    #: The orginal DSL.
+    dsl: str | None = None
 
     # Type hints for builtin flags.
     if TYPE_CHECKING:
@@ -343,7 +345,7 @@ class DSLParser:
 
     def parse(self, dsl: str) -> None:
         """Parses the DSL string into a Field object."""
-        # Initialize form as None, implied scalar unless modifiers change it.
+        self.field.dsl = dsl
         for mod in self._split_modifiers(dsl):
             if mod.strip():
                 self._apply_modifier(mod.strip())
